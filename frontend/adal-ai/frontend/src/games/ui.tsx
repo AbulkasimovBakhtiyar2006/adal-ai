@@ -74,7 +74,7 @@ export function Podium({ state, c, meId }: { state: GameState; c: GamesCopy; meI
     {me && <p className="game-podium__me" role="status">{me.rank === 1 && !draw ? c.youWon : `${c.yourPlace}: ${me.rank} · ${me.score} ${c.points}`}</p>}
     <div className="game-podium__steps">{order.map((player, slot) => player && <div key={player.id} className={`game-podium__step game-podium__step--${[2, 1, 3][slot]}`}>
       {player.rank === 1 && <span className="game-podium__crown" aria-hidden="true">👑</span>}
-      <Avatar id={player.avatar} size={slot === 1 ? 76 : 60} /><strong>{player.name}</strong><span>{player.score} {c.points}</span>
+      <Avatar id={player.avatar} size={slot === 1 ? 76 : 60} /><strong>{player.name}</strong><span className="game-podium__score">{player.score} {c.points}</span>
       <div className="game-podium__block">{player.rank}</div>
     </div>)}</div>
     {state.players.length > 3 && <details className="game-podium__all"><summary>{c.fullTable}</summary><Leaderboard players={state.players} limit={60} meId={meId} c={c} /></details>}

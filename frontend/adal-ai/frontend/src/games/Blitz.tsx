@@ -27,6 +27,7 @@ export function Blitz({ topic, onExit }: { topic: TopicId; onExit: () => void })
       const time = performance.now()
       setNow(time)
       if (time < endsAt) return
+      clearInterval(timer)
       const previous = readBlitzBest(topic)
       if (scoreRef.current > previous) saveBlitzBest(topic, scoreRef.current)
       setResult({ best: Math.max(previous, scoreRef.current), record: scoreRef.current > previous })

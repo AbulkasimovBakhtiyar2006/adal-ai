@@ -791,7 +791,7 @@ button.answer-tile:not(:disabled):active { transform: translateY(1px); box-shado
 .answer-tile:disabled { opacity: 1; cursor: default; }
 .answer-tile--1 { --tile: #1368ce; }.answer-tile--2 { --tile: #c88a00; }.answer-tile--3 { --tile: #26890c; }
 .answer-tile__shape { font-size: 26px; flex-shrink: 0; width: 30px; text-align: center; }
-.answer-tile__text { flex: 1; position: relative; }
+.answer-tile__text { flex: 1; min-width: 0; position: relative; overflow-wrap: normal; hyphens: auto; }
 .answer-tile__count { position: relative; display: flex; align-items: center; gap: 8px; min-width: 64px; font-size: 20px; justify-content: flex-end; }
 .answer-tile__count i { display: block; height: 8px; border-radius: 4px; background: #ffffffb0; max-width: 60px; }
 .answer-tile__mark { font-size: 28px; }
@@ -829,7 +829,7 @@ button.answer-tile:not(:disabled):active { transform: translateY(1px); box-shado
 .game-podium__steps { display: flex; justify-content: center; align-items: flex-end; gap: 14px; margin: 30px 0 10px; }
 .game-podium__step { display: flex; flex-direction: column; align-items: center; gap: 6px; width: min(180px,30%); animation: game-rise .7s ease-out both; }
 .game-podium__step strong { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.game-podium__step > span { color: var(--muted); font-size: 14px; }
+.game-podium__score { color: var(--muted); font-size: 14px; }
 .game-podium__crown { font-size: 34px; animation: game-pulse 1.6s ease-in-out infinite; }
 .game-podium__block { width: 100%; display: grid; place-items: center; color: #fff; font-size: 34px; font-weight: 900; border-radius: 12px 12px 0 0; }
 .game-podium__step--1 .game-podium__block { height: 170px; background: linear-gradient(#f2c84b, #c88a00); }
@@ -847,7 +847,7 @@ button.answer-tile:not(:disabled):active { transform: translateY(1px); box-shado
 @keyframes game-pulse { 50% { opacity: .55; } }
 @keyframes game-rise { from { transform: translateY(40px); opacity: 0; } to { transform: none; opacity: 1; } }
 @keyframes game-confetti { from { transform: translateY(0) rotate(0); opacity: 1; } to { transform: translateY(620px) rotate(560deg); opacity: 0; } }
-@media (max-width: 1100px) { .game-modes { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+@media (max-width: 1100px) { .game-modes { grid-template-columns: repeat(2,minmax(0,1fr)); }.answer-tile__count { min-width: 0; }.answer-tile__count i { display: none; } }
 @media (max-width: 850px) { .game-reveal { grid-template-columns: 1fr; } }
 @media (max-width: 600px) {
   .games { padding: 22px 16px 40px; }
