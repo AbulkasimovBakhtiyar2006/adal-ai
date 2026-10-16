@@ -11,6 +11,7 @@ from app.config import Settings
 from app.models import CriticReport, DocumentChunk, Draft, Language
 from app.prompts import CRITIC, GENERATOR
 from app.verification import GroundingReport, answer_text
+from app.voice import VOICE_STYLE
 
 
 class ProviderUnavailable(Exception):
@@ -23,7 +24,12 @@ class InvalidModelOutput(Exception):
 
 class Providers(Protocol):
     async def generate(
-        self, question: str, language: Language, sources: list[DocumentChunk], feedback: list[str]
+        self,
+        question: str,
+        language: Language,
+        sources: list[DocumentChunk],
+        feedback: list[str],
+        response_mode: str = "text",
     ) -> Draft: ...
     async def ground(self, draft: Draft, sources: list[DocumentChunk]) -> GroundingReport: ...
     async def critique(
@@ -55,9 +61,15 @@ class LiveProviders:
             raise ProviderUnavailable("provider_request_failed") from exc
 
     async def generate(
-        self, question: str, language: Language, sources: list[DocumentChunk], feedback: list[str]
+        self,
+        question: str,
+        language: Language,
+        sources: list[DocumentChunk],
+        feedback: list[str],
+        response_mode: str = "text",
     ) -> Draft:
         settings = self.settings
+        system = GENERATOR + ("\n" + VOICE_STYLE if response_mode == "voice" else "")
         context = {
             "question": question,
             "language": language,
@@ -76,7 +88,7 @@ class LiveProviders:
                     "messages": [
                         {
                             "role": "system",
-                            "content": GENERATOR
+                            "content": system
                             + "\nJSON schema:\n"
                             + json.dumps(Draft.model_json_schema()),
                         },
@@ -96,7 +108,7 @@ class LiveProviders:
             f"{settings.gemini_model}:generateContent",
             {"x-goog-api-key": settings.gemini_api_key.get_secret_value()},
             {
-                "systemInstruction": {"parts": [{"text": GENERATOR}]},
+                "systemInstruction": {"parts": [{"text": system}]},
                 "contents": [
                     {"role": "user", "parts": [{"text": json.dumps(context, ensure_ascii=False)}]}
                 ],

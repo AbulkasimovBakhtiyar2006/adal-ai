@@ -1,6 +1,6 @@
 import { useCallback, useReducer } from 'react'
 import { ApiError, sendMessage } from '../api/client'
-import type { HistoryTurn, Lang } from '../api/types'
+import type { HistoryTurn, Lang, ResponseMode } from '../api/types'
 import { chatReducer } from './reducer'
 
 /** Случайный id. randomUUID есть только в защищённом контексте (HTTPS, localhost). */
@@ -15,9 +15,9 @@ export function useChat(lang: Lang, conversationId?: string) {
   const busy = turns.some((turn) => turn.phase === 'pending')
 
   const deliver = useCallback(
-    async (id: string, question: string) => {
+    async (id: string, question: string, responseMode: ResponseMode = 'text', targetConversationId = conversationId) => {
       try {
-        const reply = await sendMessage(question, lang, id, conversationId)
+        const reply = await sendMessage(question, lang, id, targetConversationId, responseMode)
         dispatch({ type: 'succeeded', id, reply })
         return reply
       } catch (err) {
@@ -29,12 +29,12 @@ export function useChat(lang: Lang, conversationId?: string) {
   )
 
   const send = useCallback(
-    (question: string) => {
+    (question: string, responseMode: ResponseMode = 'text', targetConversationId = conversationId) => {
       const id = newId()
-      dispatch({ type: 'submitted', id, question })
-      return deliver(id, question)
+      dispatch({ type: 'submitted', id, question, responseMode })
+      return deliver(id, question, responseMode, targetConversationId)
     },
-    [deliver],
+    [deliver, conversationId],
   )
 
   const retry = useCallback(
@@ -42,7 +42,7 @@ export function useChat(lang: Lang, conversationId?: string) {
       const turn = turns.find((item) => item.id === id && item.phase === 'error')
       if (!turn || busy) return
       dispatch({ type: 'retried', id })
-      return deliver(id, turn.question)
+      return deliver(id, turn.question, turn.responseMode)
     },
     [turns, busy, deliver],
   )

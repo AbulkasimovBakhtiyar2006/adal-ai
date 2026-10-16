@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     critic_model: str = ""
     critic_base_url: str = "https://api.deepseek.com"
     google_cloud_project: str = ""
+    google_oauth_client_id: str = ""
     corpus_path: Path = ROOT / "data/knowledge.jsonl"
     source_max_age_days: int = Field(default=30, ge=1, le=365)
     allowed_source_hosts: list[str] = [

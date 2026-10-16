@@ -134,3 +134,17 @@ async def test_overall_timeout_fails_closed(settings, sources, draft):
     )
     assert response.status == "temporarily_unavailable"
     assert response.claims == []
+
+
+async def test_voice_mode_still_runs_all_verification_stages(settings, sources, draft):
+    class VoiceProviders(FakeProviders):
+        async def generate(self, question, language, sources, feedback, response_mode="text"):
+            assert response_mode == "voice"
+            return await super().generate(question, language, sources, feedback)
+
+    fake = VoiceProviders(draft)
+    response = await service(settings, sources, fake).ask(
+        AskRequest(question="Срок заявления", response_mode="voice"), "voice-id"
+    )
+    assert response.status == "answered"
+    assert fake.calls == ["generate", "ground", "critic"]

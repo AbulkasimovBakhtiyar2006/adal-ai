@@ -6,6 +6,7 @@ from app import google_search
 from app.config import Settings
 from app.network_chat import answer as network_answer
 from app.providers import InvalidModelOutput, ProviderUnavailable
+from app.voice import VOICE_STYLE
 
 NOTICES = {
     "ru": "Ответ DeepSeek без проверки по базе документов. "
@@ -16,10 +17,15 @@ NOTICES = {
 
 
 async def primary_answer(
-    settings: Settings, client: httpx.AsyncClient, message: str, lang: str, history: list[dict]
+    settings: Settings,
+    client: httpx.AsyncClient,
+    message: str,
+    lang: str,
+    history: list[dict],
+    response_mode: str = "text",
 ) -> dict:
     if settings.web_search_enabled:
-        reply = await network_answer(settings, client, message, lang, history)
+        reply = await network_answer(settings, client, message, lang, history, response_mode)
         if reply is not None:
             return reply
     language = "Russian" if lang == "ru" else "Kazakh"
@@ -27,8 +33,10 @@ async def primary_answer(
         {
             "role": "system",
             "content": (
-                "You are Adal AI, a helpful assistant for Kazakhstan. "
-                f"Respond in {language}. Be clear and practical. "
+                (VOICE_STYLE if response_mode == "voice" else "")
+                + "You are Adal AI, a helpful assistant for Kazakhstan. "
+                f"Respond in {language}. Write explanations and headings in this language, "
+                "even if earlier assistant messages used another language. Be clear and practical. "
                 "You have no verified document retrieval or live web access in this chat mode. "
                 "Never claim to have checked official documents, Google, or current legislation. "
                 "Do not invent sources, URLs, legal citations, "
@@ -84,9 +92,9 @@ async def primary_answer(
     }
 
 
-async def answer(settings, client, message, lang, history):
+async def answer(settings, client, message, lang, history, response_mode="text"):
     try:
-        return await primary_answer(settings, client, message, lang, history)
+        return await primary_answer(settings, client, message, lang, history, response_mode)
     except (ProviderUnavailable, InvalidModelOutput, TimeoutError):
         if not settings.web_search_enabled:
             raise
@@ -94,7 +102,8 @@ async def answer(settings, client, message, lang, history):
         result = await google_search.completion(
             settings,
             client,
-            "You are Adal AI. Respond in "
+            (VOICE_STYLE if response_mode == "voice" else "")
+            + "You are Adal AI. Respond in "
             + ("Russian" if lang == "ru" else "Kazakh")
             + '. Return JSON {"answer":"helpful reply"}. No sources are available in this call. '
             "Do not invent facts, URLs or claim verification. For factual questions explain "

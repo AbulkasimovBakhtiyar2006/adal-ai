@@ -4,6 +4,7 @@ import { afterEach } from 'vitest'
 
 // В jsdom нет прокрутки окна.
 window.scrollTo = () => {}
+Element.prototype.scrollTo = () => {}
 
 afterEach(() => {
   cleanup()

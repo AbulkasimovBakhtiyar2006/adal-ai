@@ -90,7 +90,15 @@ class AnswerService:
                     active_stage = "local"
                     try:
                         draft = await self.providers.generate(
-                            request.question, language, sources, feedback
+                            request.question,
+                            language,
+                            sources,
+                            feedback,
+                            **(
+                                {"response_mode": "voice"}
+                                if request.response_mode == "voice"
+                                else {}
+                            ),
                         )
                     except InvalidModelOutput:
                         verification.local = "rejected"

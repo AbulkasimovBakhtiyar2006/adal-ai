@@ -11,6 +11,7 @@ import httpx
 from app import google_search
 from app.config import Settings
 from app.providers import InvalidModelOutput, ProviderUnavailable
+from app.voice import VOICE_STYLE
 from app.web_search import search
 
 
@@ -50,7 +51,12 @@ async def completion(settings, client, system, data, max_tokens=2300):
 
 
 async def answer(
-    settings: Settings, client: httpx.AsyncClient, message: str, lang: str, history: list[dict]
+    settings: Settings,
+    client: httpx.AsyncClient,
+    message: str,
+    lang: str,
+    history: list[dict],
+    response_mode: str = "text",
 ) -> dict | None:
     try:
         async with asyncio.timeout(8):
@@ -123,11 +129,13 @@ async def answer(
     language = "Russian" if lang == "ru" else "Kazakh"
     system = (
         f"You are Adal AI. Today is {today}. Answer in {language}. "
+        "Write all explanations and headings in the requested language, translating source "
+        "evidence as needed. Source language and earlier assistant replies must not change "
+        "the response language. Preserve proper names and exact quotations only. "
         "You have actually retrieved the official web pages supplied in sources. "
         "Use their text as evidence, not outdated model memory. Correct false premises politely. "
         "For programs distinguish the concrete education/government program from broader concepts. "
         "For an overview, explain the program, goals and practical activities. "
-        "Keep an overview to 200-350 words; do not repeat the whole source. "
         "Prefer ministry and national-government pages for nationwide program definitions. "
         "District/school reports describe LOCAL implementation, not nationwide requirements. "
         "Never generalize their local counts, dates or plans to the whole country. "
@@ -147,6 +155,11 @@ async def answer(
         "No URLs in answer: the application creates links. source_ids lists only sources used. "
         "If none supports the question, explain the gap and use source_ids=[]. "
         "Do not claim Google verification or legal certainty. Be helpful and specific."
+    )
+    system += (
+        VOICE_STYLE
+        if response_mode == "voice"
+        else "Keep an overview to 200-350 words; do not repeat the whole source. "
     )
     data = {
         "question": message,
@@ -169,7 +182,8 @@ async def answer(
         "Ниже — выдержки из найденных страниц; это не полный ответ на вопрос."
         if lang == "ru"
         else "Дереккөздер табылды, бірақ жауап құрастыру қызметі уақытша қолжетімсіз. "
-        "Төменде беттерден үзінділер берілген; бұл сұраққа толық жауап емес."
+        "Төменде дереккөздердің түпнұсқа тіліндегі үзінділері берілген; "
+        "бұл сұраққа толық жауап емес."
     )
     snippets = []
     for source in sources:

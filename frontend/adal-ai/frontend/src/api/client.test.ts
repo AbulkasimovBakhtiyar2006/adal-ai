@@ -57,7 +57,7 @@ describe('sendMessage', () => {
     const reply = await sendMessage('Вопрос', 'kk', 'id-1')
     expect(reply.answer).toBe('Да')
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
-    expect(JSON.parse(String(init.body))).toEqual({ message: 'Вопрос', lang: 'kk', client_id: 'id-1' })
+    expect(JSON.parse(String(init.body))).toEqual({ message: 'Вопрос', lang: 'kk', client_id: 'id-1', response_mode: 'text' })
     expect(init.credentials).toBe('same-origin')
   })
 

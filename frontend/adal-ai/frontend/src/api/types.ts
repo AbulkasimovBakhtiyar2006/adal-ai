@@ -1,5 +1,6 @@
 /** Типы web API. Контракт описан в docs/ARCHITECTURE.md §4.4. */
 
+export type ResponseMode = 'text' | 'voice'
 export type Lang = 'ru' | 'kk'
 export type AiMode = 'mock' | 'real'
 export type AnswerStatus = 'answered' | 'needs_clarification' | 'insufficient_information'
@@ -33,7 +34,13 @@ export interface Conversation {
   updatedAt: number
 }
 
+export interface AccountUser { id: string; name: string; email: string }
+
 export interface PublicConfig {
+  user?: AccountUser | null
+  googleClientId?: string | null
+  googleNonce?: string | null
+  guestLocal?: boolean
   aiMode: AiMode
   maxMessageChars: number
 }
@@ -47,6 +54,8 @@ export const ERROR_CODES = [
   'AI_TIMEOUT',
   'AI_FAILED',
   'AI_BAD_RESPONSE',
+  'LOCAL_STORAGE',
+  'SESSION_CHANGED',
   'INTERNAL',
   'NETWORK',
   'CLIENT_TIMEOUT',

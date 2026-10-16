@@ -83,3 +83,8 @@ export const RetryIcon = () => (
     <path d="M4 12a8 8 0 0 1 14-5.3L20 9M20 4v5h-5M20 12a8 8 0 0 1-14 5.3L4 15M4 20v-5h5" />
   </Icon>
 )
+
+export const SettingsIcon = () => <Icon><path d="M4 6h16M4 12h16M4 18h16" /><rect x="7" y="4" width="3" height="4" rx="1" fill="var(--surface)" /><rect x="14" y="10" width="3" height="4" rx="1" fill="var(--surface)" /><rect x="8" y="16" width="3" height="4" rx="1" fill="var(--surface)" /></Icon>
+
+export const SunIcon = () => <Icon><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5 19 19M5 19l1.5-1.5M17.5 6.5 19 5" /></Icon>
+export const MoonIcon = () => <Icon><path d="M20.9 13a9 9 0 0 1-9.9-9.9A9 9 0 1 0 20.9 13Z" /></Icon>

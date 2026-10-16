@@ -1,9 +1,16 @@
 import { useRef } from 'react'
 import type { Lang } from '../api/types'
 import { useI18n } from '../i18n/context'
-import { DotsIcon, MenuIcon } from './Icons'
+import { Wordmark } from './Wordmark'
+import { experienceCopy } from '../experience/content'
+import { DotsIcon, MenuIcon, SettingsIcon, SunIcon, MoonIcon } from './Icons'
+
+import type { ColorTheme } from '../experience/useAppearance'
 
 interface HeaderProps {
+  theme: ColorTheme
+  onTheme: (theme: ColorTheme) => void
+  onSettings: () => void
   onHome: () => void
   onStart: () => void
   onSection: (section: string) => void
@@ -15,7 +22,7 @@ interface HeaderProps {
 }
 const LANGS: Lang[] = ['ru', 'kk']
 
-export function Header({ onHome, onStart, onSection, onToggleHistory, historyOpen, onDeleteData, disabled, view }: HeaderProps) {
+export function Header({ theme, onTheme, onSettings, onHome, onStart, onSection, onToggleHistory, historyOpen, onDeleteData, disabled, view }: HeaderProps) {
   const { t, lang, setLang } = useI18n()
   const menuRef = useRef<HTMLDetailsElement>(null)
   return <>
@@ -23,7 +30,7 @@ export function Header({ onHome, onStart, onSection, onToggleHistory, historyOpe
     <header className="header">
       <button className="header__brand" onClick={onHome} disabled={disabled} aria-label={`${t.appName} — ${t.home}`}>
         <img src="/kazakhstan-emblem.jpg" width="48" height="50" alt={t.portal.emblem} className="header__logo" />
-        <span className="header__text"><span className="header__name">Adal <b>AI</b></span><span className="header__tagline">{t.portalLabel}</span></span>
+        <span className="header__text"><Wordmark /><span className="header__tagline">{t.portalLabel}</span></span>
       </button>
       <nav className="header__nav" aria-label={t.portal.navigation}>
         <button disabled={disabled} aria-current={view === 'home' ? 'page' : undefined} onClick={onHome}>{t.home}</button>
@@ -36,6 +43,10 @@ export function Header({ onHome, onStart, onSection, onToggleHistory, historyOpe
         <div className="lang-switch" role="group" aria-label={t.langSwitchLabel}>
           {LANGS.map(code => <button key={code} className="lang-switch__option" aria-pressed={lang === code} lang={code} onClick={() => setLang(code)}>{code === 'kk' ? 'KZ' : 'RU'}</button>)}
         </div>
+        <button className="btn btn--ghost btn--icon theme-toggle" onClick={() => onTheme(theme === 'dark' ? 'light' : 'dark')} aria-label={theme === 'dark' ? experienceCopy[lang].switchToLight : experienceCopy[lang].switchToDark} title={theme === 'dark' ? experienceCopy[lang].switchToLight : experienceCopy[lang].switchToDark}>
+          {theme === 'dark' ? <SunIcon /> : <MoonIcon />}
+        </button>
+        <button className="btn btn--ghost btn--icon settings-toggle" onClick={onSettings} aria-label={experienceCopy[lang].settings}><SettingsIcon /></button>
         <details className="menu" ref={menuRef}>
           <summary className="btn btn--ghost btn--icon" aria-label={t.menu}><DotsIcon /></summary>
           <div className="menu__popover">

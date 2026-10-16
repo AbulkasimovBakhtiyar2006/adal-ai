@@ -16,3 +16,4 @@ output
 **/service-account*.json
 backend/data
 .railway-secrets
+.presentation-story/

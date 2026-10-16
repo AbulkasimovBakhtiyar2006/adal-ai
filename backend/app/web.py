@@ -15,6 +15,8 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 
+from app import browser_auth
+from app.chat_language import reply_language
 from app.direct_chat import answer as direct_answer
 from app.models import AskRequest
 from app.providers import InvalidModelOutput, ProviderUnavailable
@@ -32,10 +34,24 @@ class PortalFiles(StaticFiles):
         return response
 
 
+class GuestContextTurn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    question: str = Field(max_length=2000)
+    answer: str = Field(max_length=20000)
+
+
+class GoogleLogin(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    credential: str = Field(min_length=1, max_length=12000)
+
+
 class ChatRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
+    local_only: bool = False
+    context: list[GuestContextTurn] = Field(default_factory=list, max_length=20)
     message: str = Field(max_length=2000)
     lang: Literal["ru", "kk"]
+    response_mode: Literal["text", "voice"] = "text"
     client_id: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,100}$")
     conversation_id: str | None = Field(default=None, pattern=r"^[a-zA-Z0-9_-]{1,100}$")
 
@@ -59,6 +75,7 @@ class HistoryStore:
                     PRIMARY KEY (session, client_id)
                 );
             """)
+            browser_auth.initialize(db)
             columns = {row[1] for row in db.execute("PRAGMA table_info(turns)")}
             if "conversation_id" not in columns:
                 db.execute(
@@ -194,7 +211,7 @@ def install_web(app, authenticate, run_ask):
 
     router = APIRouter(prefix="/api", dependencies=[Depends(browser_access)])
 
-    async def session(request: Request, response: Response):
+    async def guest_session(request: Request, response: Response):
         store = request.app.state.history
         key, token = await asyncio.to_thread(store.session, request.cookies.get(COOKIE))
         if token:
@@ -210,11 +227,71 @@ def install_web(app, authenticate, run_ask):
         response.headers["Cache-Control"] = "no-store"
         return key
 
+    async def current_account(request):
+        return await asyncio.to_thread(
+            browser_auth.account, request.app.state.history,
+            request.cookies.get(browser_auth.AUTH_COOKIE),
+        )
+
+    async def session(request: Request, response: Response):
+        user = await current_account(request)
+        expected = request.headers.get("x-adal-account")
+        if expected and (not user or user["id"] != expected):
+            raise HTTPException(401, "account_session_changed")
+        if user:
+            response.headers["Cache-Control"] = "no-store"
+            return user["id"]
+        return await guest_session(request, response)
+
+    @router.post("/auth/google")
+    async def google_login(body: GoogleLogin, request: Request, response: Response):
+        client_id = request.app.state.settings.google_oauth_client_id
+        if not client_id:
+            raise HTTPException(503, "google_login_not_configured")
+        key = await guest_session(request, response)
+        try:
+            claims = await asyncio.to_thread(
+                browser_auth.verify_credential, body.credential, client_id
+            )
+            token = await asyncio.to_thread(
+                browser_auth.login, request.app.state.history, key, claims,
+                request.cookies.get(browser_auth.AUTH_COOKIE),
+            )
+        except ValueError:
+            raise HTTPException(401, "invalid_google_login") from None
+        response.set_cookie(
+            browser_auth.AUTH_COOKIE, token, httponly=True, samesite="strict",
+            secure=request.url.scheme == "https", max_age=browser_auth.AUTH_TTL, path="/api",
+        )
+        return {"ok": True}
+
+    @router.post("/auth/logout")
+    async def google_logout(request: Request, response: Response):
+        user = await current_account(request)
+        if user and user["id"] in request.app.state.busy_sessions:
+            return error("CONVERSATION_BUSY", 409)
+        await asyncio.to_thread(
+            browser_auth.logout, request.app.state.history,
+            request.cookies.get(browser_auth.AUTH_COOKIE),
+        )
+        response.delete_cookie(browser_auth.AUTH_COOKIE, path="/api")
+        response.headers["Cache-Control"] = "no-store"
+        return {"ok": True}
+
     @router.get("/config")
     async def config(request: Request, response: Response):
-        response.headers["Cache-Control"] = "no-store"
+        # Establish one cookie before the browser starts independent background requests.
+        key = await guest_session(request, response)
+        user = await current_account(request)
+        nonce = None
+        if request.app.state.settings.google_oauth_client_id and not user:
+            nonce = await asyncio.to_thread(browser_auth.challenge, request.app.state.history, key)
         return {
             "ai_mode": "real",
+            "user": user,
+            "google_client_id": request.app.state.settings.google_oauth_client_id or None,
+            "google_nonce": nonce,
+            "guest_local": True,
             "max_message_chars": 2000,
             "chat_mode": request.app.state.settings.web_chat_mode,
         }
@@ -272,17 +349,24 @@ def install_web(app, authenticate, run_ask):
             return error("CONVERSATION_BUSY", 409)
         state.busy_sessions.add(key)
         try:
-            if body.conversation_id:
+            if body.conversation_id and not body.local_only:
                 await asyncio.to_thread(
                     state.history.require_conversation, key, body.conversation_id
                 )
-            previous = await asyncio.to_thread(state.history.previous, key, body.client_id)
+            previous = None if body.local_only else await asyncio.to_thread(
+                state.history.previous, key, body.client_id
+            )
             if previous:
                 if previous[:2] != (body.message, body.lang) or previous[3] != (
                     body.conversation_id or "default"
                 ):
                     return error("AI_BAD_RESPONSE", 409)
                 return json.loads(previous[2])
+            history = ([turn.model_dump() for turn in body.context] if body.local_only
+                       else await asyncio.to_thread(
+                           state.history.history, key, body.conversation_id or "default"
+                       ))
+            answer_lang = reply_language(body.message, body.lang, history)
             if state.settings.web_chat_mode == "deepseek":
                 if (
                     not state.settings.deepseek_api_key or not state.settings.deepseek_model
@@ -292,11 +376,13 @@ def install_web(app, authenticate, run_ask):
                     return error("RATE_LIMITED", 429)
                 try:
                     async with state.slots, asyncio.timeout(state.settings.request_timeout_seconds):
-                        history = await asyncio.to_thread(
-                            state.history.history, key, body.conversation_id or "default"
-                        )
                         reply = await direct_answer(
-                            state.settings, state.http, body.message, body.lang, history
+                            state.settings,
+                            state.http,
+                            body.message,
+                            answer_lang,
+                            history,
+                            body.response_mode,
                         )
                 except TimeoutError:
                     return error("AI_TIMEOUT")
@@ -304,13 +390,20 @@ def install_web(app, authenticate, run_ask):
                     return error("AI_BAD_RESPONSE")
                 except ProviderUnavailable:
                     return error("AI_FAILED")
-                if reply.get("search_suggestions_html"):
+                reply["response_language"] = answer_lang
+                if reply.get("search_suggestions_html") and not body.local_only:
                     reply["search_suggestions_url"] = f"/api/search-suggestions/{body.client_id}"
-                await asyncio.to_thread(state.history.save, key, body, reply)
+                if not body.local_only:
+                    await asyncio.to_thread(state.history.save, key, body, reply)
                 return reply
             try:
                 result = await run_ask(
-                    AskRequest(question=body.message, language=body.lang), request
+                    AskRequest(
+                        question=body.message,
+                        language=answer_lang,
+                        response_mode=body.response_mode,
+                    ),
+                    request,
                 )
             except HTTPException as exc:
                 if exc.status_code == 429:
@@ -328,6 +421,7 @@ def install_web(app, authenticate, run_ask):
                 )
                 return error(code)
             reply = {
+                "response_language": answer_lang,
                 "answer": answer["answer"],
                 "ai_mode": "real",
                 "status": "answered"
@@ -342,7 +436,8 @@ def install_web(app, authenticate, run_ask):
                     for s in answer["sources"]
                 ],
             }
-            await asyncio.to_thread(state.history.save, key, body, reply)
+            if not body.local_only:
+                await asyncio.to_thread(state.history.save, key, body, reply)
             return reply
         finally:
             state.busy_sessions.discard(key)
@@ -356,6 +451,7 @@ def install_web(app, authenticate, run_ask):
             await asyncio.to_thread(request.app.state.history.clear, key, delete_session)
             if delete_session:
                 response.delete_cookie(COOKIE, path="/api")
+                response.delete_cookie(browser_auth.AUTH_COOKIE, path="/api")
             response.status_code = 204
             return response
         finally:

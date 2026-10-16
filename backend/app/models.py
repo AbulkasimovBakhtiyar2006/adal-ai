@@ -27,6 +27,7 @@ class DocumentChunk(StrictModel):
 class AskRequest(StrictModel):
     question: Annotated[Text, Field(min_length=3, max_length=2000)]
     language: Literal["auto", "ru", "kk"] = "auto"
+    response_mode: Literal["text", "voice"] = "text"
 
 
 class Evidence(StrictModel):

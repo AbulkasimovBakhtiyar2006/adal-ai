@@ -75,6 +75,54 @@ afterEach(() => {
 })
 
 describe('App', () => {
+  it('показывает страницу до ответа сервера настроек', async () => {
+    fakeServer([])
+    const fetchServer = globalThis.fetch
+    let release!: () => void
+    const pending = new Promise<void>(resolve => { release = resolve })
+    vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+      if (url === '/api/config') await pending
+      return fetchServer(url, init)
+    })
+    renderApp()
+    expect(screen.getByRole('heading', { name: 'Законы и документы Казахстана' })).toBeInTheDocument()
+    expect(screen.queryByText('Загружаем историю…')).toBeNull()
+    await act(async () => { release() })
+  })
+
+  it('открывает чат и сохраняет черновик, пока история и создание чата загружаются', async () => {
+    fakeServer([])
+    const fetchServer = globalThis.fetch
+    let releaseHistory!: () => void
+    let releaseCreate!: () => void
+    const historyPending = new Promise<void>(resolve => { releaseHistory = resolve })
+    const createPending = new Promise<void>(resolve => { releaseCreate = resolve })
+    vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+      if (url === '/api/conversations' && (init?.method ?? 'GET') === 'GET') {
+        await historyPending
+        return json(200, { conversations: [] })
+      }
+      if (url === '/api/conversations' && init?.method === 'POST') await createPending
+      return fetchServer(url, init)
+    })
+    const user = userEvent.setup()
+    renderApp()
+    const start = screen.getByRole('button', { name: 'Перейти в чат' })
+    await waitFor(() => expect(start).toBeEnabled())
+    await user.click(start)
+    const input = screen.getByLabelText('Ваш вопрос')
+    await user.type(input, 'Мой вопрос')
+    expect(screen.getByRole('button', { name: 'Отправить' })).toBeDisabled()
+    await act(async () => { releaseCreate() })
+    expect(input).toHaveValue('Мой вопрос')
+    expect(screen.getByRole('button', { name: 'Отправить' })).toBeEnabled()
+    const list = screen.getByRole('navigation', { name: 'История чатов' })
+    expect(list).toHaveAttribute('aria-busy', 'true')
+    await act(async () => { releaseHistory() })
+    expect(list).toHaveAttribute('aria-busy', 'false')
+    expect(within(list).getByRole('button', { name: /Новый диалог/ })).toBeInTheDocument()
+  })
+
   it('переносит вопрос с главной в чат для отправки', async () => {
     const server = fakeServer([])
     const user = userEvent.setup()
@@ -86,7 +134,7 @@ describe('App', () => {
   })
 
   it('выбирает тему документа и закрывает историю по Escape', async () => {
-    fakeServer([])
+    const server = fakeServer([answer()])
     const user = userEvent.setup()
     renderApp()
     await user.click(await screen.findByRole('button', { name: 'История чатов' }))
@@ -95,22 +143,54 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: 'История чатов' })).toHaveAttribute('aria-expanded', 'false')
     await user.click(await screen.findByRole('button', { name: 'Документы' }))
     await user.click(screen.getByRole('button', { name: /Конституция и законы:/ }))
-    expect(await screen.findByLabelText('Ваш вопрос')).toHaveValue('Помоги разобраться в структуре Конституции Республики Казахстан.')
+    await screen.findByText('Тестовый ответ')
+    expect(server.chatCalls()[0].body).toMatchObject({ message: 'Помоги разобраться в структуре Конституции Республики Казахстан.', conversation_id: 'chat-1' })
+    expect(screen.getByLabelText('Ваш вопрос')).toHaveValue('')
   })
 
-  it('показывает главную страницу и примеры как подсказки', async () => {
-    const server = fakeServer([])
+  it('отправляет выбранную тему с главной и скрывает остальные темы во время ответа', async () => {
+    let release: (response: Response) => void = () => {}
+    const server = fakeServer([() => new Promise<Response>(resolve => { release = resolve })])
     const user = userEvent.setup()
     renderApp()
 
-    expect(await screen.findByRole('heading', { name: 'Разобраться в документах — проще.' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Законы и документы Казахстана' })).toBeInTheDocument()
     expect(screen.getByText(/Не является официальным государственным органом/)).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: /Слышащее государство/ }))
-    expect(await screen.findByLabelText('Ваш вопрос')).toHaveValue(
-      'Объясни концепцию «Слышащее государство» по официальным источникам.',
-    )
-    expect(server.chatCalls()).toHaveLength(0)
+    expect(await screen.findByText('ИИ готовит ответ…')).toBeInTheDocument()
+    expect(screen.getByLabelText('Ваш вопрос')).toHaveValue('')
+    expect(server.chatCalls()).toHaveLength(1)
+    expect(server.chatCalls()[0].body).toMatchObject({
+      message: 'Объясни концепцию «Слышащее государство» по официальным источникам.',
+      conversation_id: 'chat-1', lang: 'ru',
+    })
+    expect(screen.queryByText('Право и общество')).not.toBeInTheDocument()
+    expect(screen.queryByText('Устойчивое развитие')).not.toBeInTheDocument()
+    release(answer()())
+    await screen.findByText('Тестовый ответ')
+    expect(screen.queryByText('Примеры вопросов')).not.toBeInTheDocument()
+  })
+
+  it.each([false, true])('отправляет тему в правильный диалог при существующем чате (с сообщениями: %s)', async hasMessages => {
+    const server = fakeServer([answer(), answer()])
+    const user = userEvent.setup()
+    renderApp()
+    await user.click(await screen.findByRole('button', { name: 'Перейти в чат' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Новый диалог' })).toBeEnabled())
+    if (hasMessages) {
+      await user.type(screen.getByLabelText('Ваш вопрос'), 'Первый вопрос{Enter}')
+      await screen.findByText('Тестовый ответ')
+    }
+    await user.click(screen.getByRole('button', { name: 'На главную' }))
+    await user.click(screen.getByRole('button', { name: /Государственная политика:/ }))
+    await screen.findByText('Тестовый ответ')
+    expect(server.chatCalls()).toHaveLength(hasMessages ? 2 : 1)
+    expect(server.chatCalls().at(-1)?.body).toMatchObject({
+      message: 'Объясни концепцию «Слышащее государство» по официальным источникам.',
+      conversation_id: hasMessages ? 'chat-2' : 'chat-1',
+    })
+    expect(screen.queryByText('Право и общество')).not.toBeInTheDocument()
   })
 
   it('показывает индикатор ожидания, затем уточняющий вопрос', async () => {
@@ -166,10 +246,10 @@ describe('App', () => {
     const user = userEvent.setup()
     renderApp()
 
-    await screen.findByRole('heading', { name: 'Разобраться в документах — проще.' })
+    await screen.findByRole('heading', { name: 'Законы и документы Казахстана' })
     await user.click(screen.getByRole('button', { name: 'KZ' }))
 
-    expect(screen.getByRole('heading', { name: 'Құжаттарды түсіну оңайырақ.' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Қазақстан заңдары мен құжаттары' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'KZ' })).toHaveAttribute('aria-pressed', 'true')
     expect(document.documentElement.lang).toBe('kk')
 
@@ -236,7 +316,7 @@ describe('voice UI', () => {
       instances[0].onend?.()
     })
     await waitFor(() => expect(spoken).toHaveLength(1))
-    expect(server.chatCalls()[0].body).toMatchObject({ message: 'Голосовой вопрос', conversation_id: 'chat-1', lang: 'ru' })
+    expect(server.chatCalls()[0].body).toMatchObject({ message: 'Голосовой вопрос', conversation_id: 'chat-1', lang: 'ru', response_mode: 'voice' })
     expect(spoken[0].text).toBe('Тестовый ответ')
     await user.click(screen.getByRole('button', { name: 'Завершить' }))
     expect(screen.queryByRole('dialog')).toBeNull()

@@ -8,6 +8,18 @@ from tests.conftest import FakeProviders
 from tests.test_api import write_sources
 
 
+def test_config_establishes_session_before_background_history(settings, draft):
+    with TestClient(create_app(settings, FakeProviders(draft))) as client:
+        config = client.get("/api/config")
+        assert config.status_code == 200
+        assert config.headers["cache-control"] == "no-store"
+        cookie = client.cookies.get("adal_session")
+        assert cookie
+        created = client.post("/api/conversations").json()
+        assert client.get("/api/conversations").json()["conversations"] == [created]
+        assert client.cookies.get("adal_session") == cookie
+
+
 def test_public_website_keeps_admin_and_direct_api_private(settings, sources, draft):
     write_sources(settings, sources)
     settings.public_web_enabled = True
@@ -16,10 +28,11 @@ def test_public_website_keeps_admin_and_direct_api_private(settings, sources, dr
     with TestClient(
         create_app(settings, FakeProviders(draft)), base_url="https://adal.example"
     ) as client:
-        assert client.get("/api/config").status_code == 200
+        config = client.get("/api/config")
+        assert config.status_code == 200
+        assert "Secure" in config.headers["set-cookie"]
         response = client.get("/api/history")
         assert response.status_code == 200
-        assert "Secure" in response.headers["set-cookie"]
         body = {"message": "Как рассматривается заявление?", "lang": "ru", "client_id": "public-1"}
         assert client.post("/api/chat", json=body).status_code == 200
         assert client.get("/ready").status_code == 401
@@ -51,11 +64,12 @@ def test_browser_chat_history_and_idempotency(settings, sources, draft):
     providers = FakeProviders(draft)
     app = create_app(settings, providers)
     with TestClient(app) as client:
-        assert client.get("/api/config").json()["ai_mode"] == "real"
+        config = client.get("/api/config")
+        assert config.json()["ai_mode"] == "real"
         initial = client.get("/api/history")
         assert initial.json() == {"turns": []}
-        assert "HttpOnly" in initial.headers["set-cookie"]
-        assert "SameSite=strict" in initial.headers["set-cookie"]
+        assert "HttpOnly" in config.headers["set-cookie"]
+        assert "SameSite=strict" in config.headers["set-cookie"]
         body = {
             "message": "Как рассматривается заявление?",
             "lang": "ru",

@@ -32,10 +32,11 @@ function devMockApi(): Plugin {
 function contentSecurityPolicy(): Plugin {
   const policy = [
     "default-src 'self'",
-    "script-src 'self'",
-    "style-src 'self'",
+    "script-src 'self' https://accounts.google.com/gsi/client",
+    "style-src 'self' https://accounts.google.com/gsi/style",
     "img-src 'self' data:",
-    "connect-src 'self'",
+    "connect-src 'self' https://accounts.google.com/gsi/",
+    "frame-src 'self' https://accounts.google.com/gsi/",
     "manifest-src 'self'",
     "worker-src 'self'",
     "object-src 'none'",

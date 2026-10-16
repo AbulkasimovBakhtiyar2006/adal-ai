@@ -1,3 +1,4 @@
+import { localHistory } from '../chat/localHistory'
 /**
  * Клиент web API. Ключей и секретов здесь нет и быть не должно: браузер общается
  * только с нашим сервером, а сессия передаётся HttpOnly-cookie.
@@ -14,12 +15,15 @@ import {
   type HistoryTurn,
   type Lang,
   type PublicConfig,
+  type ResponseMode,
   type Source,
 } from './types'
 
 /** Сервер ждёт ИИ не дольше AI_TIMEOUT_SECONDS; клиент ждёт чуть дольше. */
 const CHAT_TIMEOUT_MS = 120_000
 const DEFAULT_TIMEOUT_MS = 15_000
+let localGuest = false
+let accountId: string | undefined
 const MAX_SOURCES = 20
 const MAX_TITLE_CHARS = 300
 
@@ -47,7 +51,7 @@ async function request(method: string, path: string, body?: unknown, timeoutMs =
     response = await fetch(path, {
       method,
       credentials: 'same-origin',
-      headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+      headers: { ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...(accountId && path !== '/api/config' ? { 'X-Adal-Account': accountId } : {}) },
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: controller.signal,
     })
@@ -57,6 +61,7 @@ async function request(method: string, path: string, body?: unknown, timeoutMs =
     clearTimeout(timer)
   }
 
+  if (response.status === 401 && accountId) throw new ApiError('SESSION_CHANGED')
   if (response.status === 204) return null
 
   let data: unknown = null
@@ -122,10 +127,20 @@ export async function getConfig(): Promise<PublicConfig> {
   const aiMode = raw.ai_mode
   if (aiMode !== 'mock' && aiMode !== 'real') throw new ApiError('INTERNAL')
   const max = typeof raw.max_message_chars === 'number' && raw.max_message_chars > 0 ? raw.max_message_chars : 2000
-  return { aiMode, maxMessageChars: max }
+  const user = raw.user && typeof raw.user === 'object' ? raw.user as Record<string, unknown> : null
+  if (user && (typeof user.id !== 'string' || typeof user.name !== 'string' || typeof user.email !== 'string')) throw new ApiError('INTERNAL')
+  accountId = user ? String(user.id) : undefined
+  localGuest = raw.guest_local === true && !user
+  return { aiMode, maxMessageChars: max,
+    user: user ? { id: String(user.id), name: String(user.name), email: String(user.email) } : null,
+    guestLocal: raw.guest_local === true,
+    googleClientId: typeof raw.google_client_id === 'string' ? raw.google_client_id : null,
+    googleNonce: typeof raw.google_nonce === 'string' ? raw.google_nonce : null,
+  }
 }
 
 export async function getHistory(conversationId?: string): Promise<HistoryTurn[]> {
+  if (localGuest) return local(() => localHistory.history(conversationId))
   const path = conversationId ? `/api/history?conversation_id=${encodeURIComponent(conversationId)}` : '/api/history'
   const raw = (await request('GET', path)) as { turns?: unknown }
   if (!Array.isArray(raw.turns)) return []
@@ -143,9 +158,17 @@ export async function getHistory(conversationId?: string): Promise<HistoryTurn[]
 }
 
 /** clientId делает отправку идемпотентной: повтор не создаёт второй вопрос на сервере. */
-export async function sendMessage(message: string, lang: Lang, clientId: string, conversationId?: string): Promise<ChatReply> {
-  const raw = await request('POST', '/api/chat', { message, lang, client_id: clientId, conversation_id: conversationId }, CHAT_TIMEOUT_MS)
-  return normalizeReply(raw)
+export async function sendMessage(message: string, lang: Lang, clientId: string, conversationId?: string, responseMode: ResponseMode = 'text'): Promise<ChatReply> {
+  const guest = localGuest
+  const previous = guest ? local(() => localHistory.history(conversationId)) : []
+  const existing = previous.find(turn => turn.id === clientId)
+  if (existing) return existing.reply
+  const raw = await request('POST', '/api/chat', { message, lang, client_id: clientId, conversation_id: conversationId, response_mode: responseMode,
+    ...(guest ? { local_only: true, context: previous.slice(-20).map(turn => ({ question: turn.question, answer: turn.reply.answer.slice(0, 20000) })) } : {}),
+  }, CHAT_TIMEOUT_MS)
+  const reply = normalizeReply(raw)
+  if (guest && conversationId) local(() => localHistory.save(conversationId, { id: clientId, question: message, reply }))
+  return reply
 }
 
 function normalizeConversation(value: unknown): Conversation {
@@ -155,21 +178,36 @@ function normalizeConversation(value: unknown): Conversation {
 }
 
 export async function getConversations(): Promise<Conversation[]> {
+  if (localGuest) return local(localHistory.list)
   const raw = await request('GET', '/api/conversations') as { conversations?: unknown }
   if (!Array.isArray(raw.conversations)) throw new ApiError('INTERNAL')
   return raw.conversations.map(normalizeConversation)
 }
 
 export async function createConversation(): Promise<Conversation> {
+  if (localGuest) return local(localHistory.create)
   return normalizeConversation(await request('POST', '/api/conversations'))
 }
 
 /** Новый диалог: сервер удаляет сообщения текущего разговора. */
 export async function clearHistory(): Promise<void> {
+  if (localGuest) { local(localHistory.clear); return }
   await request('DELETE', '/api/history')
 }
 
 /** Удалить мои данные: сервер удаляет историю и саму сессию. */
 export async function deleteSession(): Promise<void> {
+  if (localGuest) { local(localHistory.clear); return }
   await request('DELETE', '/api/session')
+}
+
+function local<T>(operation: () => T): T {
+  try { return operation() } catch { throw new ApiError('LOCAL_STORAGE') }
+}
+
+export async function signInWithGoogle(credential: string): Promise<void> {
+  await request('POST', '/api/auth/google', { credential })
+}
+export async function signOut(): Promise<void> {
+  await request('POST', '/api/auth/logout', {})
 }

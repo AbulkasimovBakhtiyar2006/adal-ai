@@ -102,3 +102,42 @@ def test_direct_missing_key_and_concurrency_limit(settings, monkeypatch):
         settings.deepseek_api_key = SecretStr("test-deepseek")
         monkeypatch.setattr(app.state.slots, "locked", lambda: True)
         assert client.post("/api/chat", json=body).status_code == 429
+
+
+@pytest.mark.parametrize("response_mode", ["voice", "text"])
+def test_voice_style_reaches_model_and_retains_context(settings, monkeypatch, response_mode):
+    from app.voice import VOICE_STYLE
+
+    calls = []
+
+    async def post(self, url, **kwargs):
+        calls.append(kwargs["json"])
+        return httpx.Response(
+            200,
+            request=httpx.Request("POST", url),
+            json={"choices": [{"finish_reason": "stop", "message": {"content": "Краткий ответ."}}]},
+        )
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", post)
+    with TestClient(create_app(enable(settings))) as client:
+        body = {
+            "message": "Расскажи о программе",
+            "lang": "ru",
+            "client_id": "voice-1",
+            "response_mode": response_mode,
+        }
+        assert client.post("/api/chat", json=body).status_code == 200
+        assert (VOICE_STYLE in calls[0]["messages"][0]["content"]) == (response_mode == "voice")
+        assert (
+            client.post(
+                "/api/chat",
+                json=body
+                | {
+                    "message": "Расскажи подробнее",
+                    "client_id": "voice-2",
+                },
+            ).status_code
+            == 200
+        )
+        assert calls[1]["messages"][1]["content"] == body["message"]
+        assert calls[1]["messages"][-1]["content"] == "Расскажи подробнее"

@@ -1,5 +1,6 @@
+import { accountCopy } from './account/copy'
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { ApiError, createConversation, deleteSession, getConfig, getConversations, getHistory } from './api/client'
+import { ApiError, createConversation, deleteSession, getConfig, getConversations, getHistory, signInWithGoogle, signOut } from './api/client'
 import type { Conversation, ErrorCode, PublicConfig } from './api/types'
 import { useChat } from './chat/useChat'
 import { Composer } from './components/Composer'
@@ -10,7 +11,20 @@ import { VoiceCall } from './components/VoiceCall'
 import { useVoice } from './voice/useVoice'
 import { TurnView } from './components/TurnView'
 import { Examples, Welcome } from './components/Welcome'
+import { useAppearance } from './experience/useAppearance'
+import type { CharacterId } from './experience/content'
+import { AppearanceSettings } from './components/AppearanceSettings'
+import { CharacterProfile, CharacterCompanion } from './components/Characters'
 import { useI18n } from './i18n/context'
+
+function mergeConversations(current: Conversation[], incoming: Conversation[]): Conversation[] {
+  const items = new Map(current.map(item => [item.id, item]))
+  for (const item of incoming) {
+    const previous = items.get(item.id)
+    if (!previous || item.updatedAt >= previous.updatedAt) items.set(item.id, item)
+  }
+  return [...items.values()].sort((a, b) => b.updatedAt - a.updatedAt)
+}
 
 type Boot = { phase: 'loading' } | { phase: 'ready'; config: PublicConfig } | { phase: 'error'; code: ErrorCode }
 function subscribeOnline(callback: () => void) {
@@ -21,8 +35,13 @@ function subscribeOnline(callback: () => void) {
 
 export default function App() {
   const { t, lang } = useI18n()
+  const appearance = useAppearance()
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [profile, setProfile] = useState<CharacterId | null>(null)
   const [boot, setBoot] = useState<Boot>({ phase: 'loading' })
   const [conversations, setConversations] = useState<Conversation[]>([])
+  const [historyLoading, setHistoryLoading] = useState(true)
+  const [historyFailed, setHistoryFailed] = useState(false)
   const [activeId, setActiveId] = useState<string>()
   const [view, setView] = useState<'home' | 'chat'>('home')
   const [switching, setSwitching] = useState(false)
@@ -39,20 +58,38 @@ export default function App() {
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const operationRef = useRef(false)
-  // Drafts stay in memory while switching chats; message history lives on the server.
+  const historyRequestRef = useRef(0)
+  // Drafts stay in memory; guest history lives in this browser, account history on the server.
   const draftsRef = useRef<Record<string, string>>({})
+
+  const refreshList = useCallback(async () => {
+    const request = ++historyRequestRef.current
+    setHistoryLoading(true)
+    setHistoryFailed(false)
+    try {
+      const items = await getConversations()
+      if (request === historyRequestRef.current) {
+        setConversations(current => mergeConversations(current, items))
+      }
+    } catch {
+      if (request === historyRequestRef.current) setHistoryFailed(true)
+    } finally {
+      if (request === historyRequestRef.current) setHistoryLoading(false)
+    }
+  }, [])
 
   useEffect(() => {
     let active = true
-    void Promise.all([getConfig(), getConversations()]).then(([config, items]) => {
+    // Config establishes the session before list loading and chat creation run in parallel.
+    void getConfig().then(config => {
       if (!active) return
-      setConversations(items)
       setBoot({ phase: 'ready', config })
+      void refreshList()
     }).catch(err => {
       if (active) setBoot({ phase: 'error', code: err instanceof ApiError ? err.code : 'INTERNAL' })
     })
-    return () => { active = false }
-  }, [loadAttempt])
+    return () => { active = false; historyRequestRef.current += 1 }
+  }, [loadAttempt, refreshList])
 
   const lastTurn = chat.turns.at(-1)
   useEffect(() => {
@@ -74,29 +111,38 @@ export default function App() {
   }, [sidebarOpen])
 
   const ready = boot.phase === 'ready'
+  const maxChars = boot.phase === 'ready' ? boot.config.maxMessageChars : 2000
   const locked = chat.busy || switching || !ready
-  const refreshList = async () => {
-    try { setConversations(await getConversations()) } catch { setActionFailed(true) }
-  }
-  const startChat = async (example = '') => {
+  const startChat = async (example = '', sendImmediately = false) => {
     if (locked || operationRef.current) return
     if (activeId && chat.turns.length === 0 && !draft) {
       setDraft(example); setView('chat'); setSidebarOpen(false)
+      if (sendImmediately && example) {
+        setDraft('')
+        draftsRef.current[activeId] = ''
+        void chat.send(example).then(refreshList)
+      }
       inputRef.current?.focus()
       return
     }
     operationRef.current = true
     setSwitching(true)
     setActionFailed(false)
+    if (activeId) draftsRef.current[activeId] = draft
+    clear()
+    setActiveId(undefined)
+    setDraft(example || (!activeId && view === 'chat' ? draft : ''))
+    setView('chat')
+    setSidebarOpen(false)
     try {
       const item = await createConversation()
-      if (activeId) draftsRef.current[activeId] = draft
-      setConversations(items => [item, ...items])
+      setConversations(items => mergeConversations(items, [item]))
       setActiveId(item.id)
-      clear()
-      setDraft(example)
-      setView('chat')
-      setSidebarOpen(false)
+      if (sendImmediately && example) {
+        setDraft('')
+        // Use the new ID immediately; this render still holds the previous chat ID.
+        void chat.send(example, 'text', item.id).then(refreshList)
+      }
     } catch { setActionFailed(true) }
     finally { setSwitching(false); operationRef.current = false }
   }
@@ -129,16 +175,39 @@ export default function App() {
   const removeData = async () => {
     setConfirmDelete(false)
     setSwitching(true)
+    historyRequestRef.current += 1
     try {
       await deleteSession()
-      // Establish a fresh cookie before the next create-chat request.
+      const config = await getConfig()
+      setBoot({ phase: 'ready', config })
       setConversations(await getConversations())
+      setHistoryLoading(false); setHistoryFailed(false)
       clear(); setActiveId(undefined); setDraft(''); setView('home')
       draftsRef.current = {}
       setActionFailed(false)
     } catch { setActionFailed(true) }
     finally { setSwitching(false) }
   }
+  const changeAccount = useCallback(async (credential: string | null) => {
+    if (operationRef.current) throw new Error('Operation in progress')
+    operationRef.current = true
+    setSwitching(true)
+    historyRequestRef.current += 1
+    try {
+      if (credential) await signInWithGoogle(credential)
+      else await signOut()
+      // Clear private UI before loading a different identity, even if config fails.
+      clear(); setActiveId(undefined); setDraft(''); setView('home')
+      setConversations([]); draftsRef.current = {}
+      const config = await getConfig()
+      setBoot({ phase: 'ready', config })
+      await refreshList()
+    } catch (err) {
+      // Re-establish identity before another chat request after an ambiguous network error.
+      setBoot({ phase: 'error', code: 'SESSION_CHANGED' })
+      throw err
+    } finally { setSwitching(false); operationRef.current = false }
+  }, [clear, refreshList])
   const activeChat = conversations.find(item => item.id === activeId)
   const goHome = () => {
     setView('home'); setSidebarOpen(false)
@@ -152,9 +221,9 @@ export default function App() {
       target?.focus({ preventScroll: true })
     })
   }
-  return <div className={`app workspace workspace--${view} ${sidebarOpen ? 'workspace--history-open' : ''}`}>
+  return <div className={`app workspace workspace--${view} ${appearance.mode === 'youth' ? 'workspace--youth' : ''} ${sidebarOpen ? 'workspace--history-open' : ''}`}>
     <a className="skip-link" href="#workspace-main">{view === 'home' ? t.home : t.inputLabel}</a>
-    <div className="top"><Header onHome={goHome} disabled={locked} view={view}
+    <div className="top"><Header theme={appearance.theme} onTheme={appearance.setTheme} onSettings={() => { setSidebarOpen(false); setSettingsOpen(true) }} onHome={goHome} disabled={locked} view={view}
       onStart={() => { if (activeId) { setView('chat'); setSidebarOpen(false) } else void startChat() }} onSection={goSection}
       onToggleHistory={() => setSidebarOpen(open => !open)} historyOpen={sidebarOpen}
       onDeleteData={() => setConfirmDelete(true)} /></div>
@@ -165,8 +234,10 @@ export default function App() {
       <button className="sidebar-home" disabled={locked} onClick={goHome}><HomeIcon />{t.portal.returnToPortal}</button>
       <button className="sidebar-home" disabled={locked} onClick={() => goSection('resources')}><BookIcon />{t.portal.resources}</button>
       <div className="sidebar-heading"><h2>{t.chatHistory}</h2><span>{conversations.length}</span></div>
-      <nav className="chat-list" aria-label={t.chatHistory}>
-        {conversations.length === 0 && <p className="sidebar-empty">{t.noChats}</p>}
+      <nav className="chat-list" aria-label={t.chatHistory} aria-busy={historyLoading}>
+        {historyFailed && <div className="sidebar-empty" role="alert"><p>{t.historyLoadError}</p><button className="btn btn--ghost" onClick={() => void refreshList()}>{t.reload}</button></div>}
+        {historyLoading && conversations.length === 0 && <div className="history-placeholder" aria-hidden="true"><span /><span /><span /></div>}
+        {!historyLoading && !historyFailed && conversations.length === 0 && <p className="sidebar-empty">{t.noChats}</p>}
         {conversations.map(item => <button key={item.id} disabled={locked}
           aria-current={view === 'chat' && activeId === item.id ? 'page' : undefined}
           title={item.title || t.newChat} onClick={() => void openChat(item.id)}>
@@ -174,37 +245,39 @@ export default function App() {
           <time dateTime={new Date(item.updatedAt * 1000).toISOString()}>{new Date(item.updatedAt * 1000).toLocaleDateString(lang === 'kk' ? 'kk-KZ' : 'ru-RU', { day: '2-digit', month: '2-digit' })}</time>
         </button>)}
       </nav>
-      <div className="sidebar-footer"><div className="sidebar-project"><span>A</span><div><strong>{t.portal.sidebarProject}</strong><small>{t.portal.sidebarProjectHint}</small></div></div><p>{t.historyHint}</p><a href="/admin">{t.management}<span aria-hidden="true">↗</span></a></div>
+      <div className="sidebar-footer"><div className="sidebar-project"><span>A</span><div><strong>{t.portal.sidebarProject}</strong><small>{t.portal.sidebarProjectHint}</small></div></div><p>{boot.phase === 'ready' && boot.config.user ? accountCopy[lang].sidebar : t.historyHint}</p><a href="/admin">{t.management}<span aria-hidden="true">↗</span></a></div>
     </aside>
     <main className="workspace-main" id="workspace-main" tabIndex={-1} aria-busy={switching} inert={sidebarOpen}>
       {!online && <div className="banner banner--offline" role="status">{t.offline}</div>}
       {actionFailed && <div className="banner banner--error" role="alert">{t.actionFailed}<button className="btn btn--ghost" onClick={() => void refreshList()}>{t.reload}</button></div>}
-      {boot.phase === 'loading' && <p className="thread__status">{t.loadingHistory}</p>}
       {boot.phase === 'error' && <div className="answer answer--error" role="alert"><h2>{t.configLoadError}</h2><p>{t.errors[boot.code]}</p><button className="btn btn--secondary" onClick={() => { setBoot({ phase: 'loading' }); setLoadAttempt(n => n + 1) }}>{t.reload}</button></div>}
-      {ready && view === 'home' && <div className="home-scroll"><Welcome disabled={locked} maxChars={boot.config.maxMessageChars} onStart={() => void startChat()} onPickExample={text => void startChat(text)} /></div>}
-      {ready && view === 'chat' && <>
+      {view === 'home' && <div className="home-scroll"><Welcome youth={appearance.mode === 'youth'} character={appearance.character} onProfile={setProfile} onWork={() => appearance.setMode('work')} disabled={locked} maxChars={maxChars} onStart={() => void startChat()} onPickExample={text => void startChat(text)} onPickTopic={text => void startChat(text, true)} /></div>}
+      {view === 'chat' && <>
         <div className="chat-heading"><div><h1>{activeChat?.title || t.consultant}</h1><p>{t.portal.chatSubtitle}</p></div><button className="btn btn--secondary voice-launch" disabled={locked || !online} onClick={() => { voice.controller.end(); setVoiceOpen(true) }}><PhoneIcon />{t.voice.title}</button></div>
+        {appearance.mode === 'youth' && <CharacterCompanion id={appearance.character} onProfile={setProfile} onSettings={() => setSettingsOpen(true)} />}
         <div className="chat-scroll" ref={scrollRef}>
           <div className="thread">
-            {chat.turns.length === 0 ? <section className="empty-chat"><span className="empty-chat__mark"><BookIcon /></span><p className="eyebrow">ADAL AI · {t.portalCountry}</p><h2>{t.emptyChatTitle}</h2><p>{t.portal.chatDescription}</p><Examples onPick={pickExample} disabled={locked} /></section> :
+            {chat.turns.length === 0 ? <section className="empty-chat"><h2>{t.emptyChatTitle}</h2>{!switching && <Examples onPick={pickExample} disabled={locked} />}</section> :
               <ol className="turns" aria-live="polite">{chat.turns.map(turn => <TurnView key={turn.id} turn={turn} canRetry={turn.id === lastTurn?.id && !locked}
                 canSpeak={voice.controller.canSpeak} speaking={voice.state.speakingId === turn.id}
                 onSpeak={() => { if (turn.reply) voice.controller.read(turn.id, turn.reply.answer) }}
                 onRetry={id => { void chat.retry(id)?.then(refreshList) }} />)}</ol>}
           </div>
         </div>
-        <footer className="composer-area"><Composer value={draft} onChange={setDraft} onSubmit={submit} busy={chat.busy} disabled={switching}
-          maxChars={boot.config.maxMessageChars} inputRef={inputRef} />
+        <footer className="composer-area"><Composer value={draft} onChange={setDraft} onSubmit={submit} busy={chat.busy || switching || !ready || !activeId} disabled={switching && !!activeId}
+          maxChars={maxChars} inputRef={inputRef} />
           {!voiceOpen && voice.state.error && <p className="voice-error" role="alert">{t.voice.errors[voice.state.error]}</p>}
           <p className="composer-footnote">{t.portal.chatFootnote}</p>
         </footer>
       </>}
     </main>
+    {settingsOpen && <AppearanceSettings config={boot.phase === 'ready' ? boot.config : undefined} disabled={locked} onAuth={changeAccount} theme={appearance.theme} onTheme={appearance.setTheme} mode={appearance.mode} character={appearance.character} onMode={appearance.setMode} onCharacter={appearance.setCharacter} onClose={() => setSettingsOpen(false)} />}
+    {profile && appearance.mode === 'youth' && <CharacterProfile id={profile} selected={appearance.character} onSelect={appearance.setCharacter} disabled={locked} onQuestion={text => { if (view === 'chat') pickExample(text); else void startChat(text) }} onClose={() => setProfile(null)} />}
     {confirmDelete && <ConfirmDialog title={t.deleteDataConfirmTitle} text={t.deleteDataConfirmText} confirmLabel={t.deleteDataConfirm} onConfirm={() => void removeData()} onCancel={cancelDelete} />}
     {voiceOpen && <VoiceCall controller={voice.controller} state={voice.state} busy={locked || !online}
       onClose={() => { voice.controller.end(); setVoiceOpen(false) }}
       onQuestion={async question => {
-        const reply = await chat.send(question)
+        const reply = await chat.send(question, 'voice')
         void refreshList()
         return reply?.answer
       }} />}

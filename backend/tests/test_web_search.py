@@ -198,3 +198,25 @@ def test_grouped_citations_are_validated_and_linked():
     assert "[1, 2]" not in reply["answer"]
     assert "[2](https://www.gov.kz/second)" in reply["answer"]
     assert len(reply["sources"]) == 2
+
+
+async def test_voice_search_preserves_sources_and_replaces_long_overview_style(
+    settings, monkeypatch
+):
+    from app.voice import VOICE_STYLE
+
+    async def find(*args):
+        return [SOURCE]
+
+    async def complete(settings, client, system, data, max_tokens=2300):
+        if "sources" not in data:
+            return {"needs_search": True, "query": "Адал азамат"}
+        assert VOICE_STYLE in system
+        assert "200-350" not in system
+        return {"answer": "Это программа воспитания. [1]", "source_ids": [1]}
+
+    monkeypatch.setattr(network_chat, "search", find)
+    monkeypatch.setattr(network_chat, "completion", complete)
+    reply = await network_chat.answer(settings, None, "Что за программа?", "ru", [], "voice")
+    assert reply["sources"][0]["url"] == SOURCE["url"]
+    assert "[1](" in reply["answer"]
