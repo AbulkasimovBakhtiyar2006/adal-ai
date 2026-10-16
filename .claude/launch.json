@@ -1,0 +1,34 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "backend",
+      "runtimeExecutable": "/Users/abulkasimovbakhtiyar/IdeaProjects/adal-ai/backend/.venv/bin/python",
+      "runtimeArgs": [
+        "-m",
+        "app"
+      ],
+      "cwd": "/Users/abulkasimovbakhtiyar/IdeaProjects/adal-ai/backend",
+      "port": 8000
+    },
+    {
+      "name": "frontend",
+      "url": "http://localhost:5173",
+      "port": 5173
+    },
+    {
+      "name": "backend-8010",
+      "runtimeExecutable": "/Users/abulkasimovbakhtiyar/IdeaProjects/adal-ai/backend/.venv/bin/python",
+      "runtimeArgs": [
+        "-m",
+        "uvicorn",
+        "app.main:create_app",
+        "--factory",
+        "--port",
+        "8010"
+      ],
+      "cwd": "/Users/abulkasimovbakhtiyar/IdeaProjects/adal-ai/backend",
+      "port": 8010
+    }
+  ]
+}
