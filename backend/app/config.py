@@ -43,6 +43,8 @@ class Settings(BaseSettings):
     grounding_citation_threshold: Score = 0.8
     backend_api_key: SecretStr = SecretStr("")
     public_web_enabled: bool = False
+    web_chat_mode: Literal["verified", "deepseek"] = "verified"
+    web_search_enabled: bool = False
     cors_origins: list[str] = ["http://localhost:3000", "http://localhost:5173"]
     host: str = "127.0.0.1"
     port: int = Field(default=8000, ge=1, le=65535)

@@ -1,0 +1,7 @@
+import fs from 'node:fs/promises';
+import {Presentation, PresentationFile} from '@oai/artifact-tool';
+import {finalizePresentation} from '/Users/abulkasimovbakhtiyar/.codex/plugins/cache/openai-primary-runtime/presentations/26.1013.11914/skills/presentations/container_tools/artifact_tool_utils.mjs';
+const root='/Users/abulkasimovbakhtiyar/IdeaProjects/adal-ai', dir=root+'/.presentation-story';
+const sk='/Users/abulkasimovbakhtiyar/.codex/plugins/cache/openai-primary-runtime/presentations/26.1013.11914/skills/presentations';
+process.env.RUNTIME_NODE_MODULES='/Users/abulkasimovbakhtiyar/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules';
+const result=await finalizePresentation({workspaceDir:root,candidatePath:dir+'/draft.pptx',finalPath:root+'/output/Adal_AI_презентация_с_фото.pptx',pythonExecutable:'/Users/abulkasimovbakhtiyar/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3',integrityValidatorPath:sk+'/container_tools/inspect_presentation_package_integrity.py',layoutValidatorPath:sk+'/container_tools/inspect_presentation_layout_geometry.py',layoutArgs:['--expected-slide-size-emu','12192000,6858000','--validate-heading-fit',...[7,11,14,18,19].flatMap(n=>['--require-native-table-slide',String(n)])],requiredNativeTableOwnerSlides:[7,11,14,18,19],fontPolicy:{basis:'design',families:['Arial']},verifyArtifactToolImport:true,receiptPath:dir+'/validation.json'});console.log(JSON.stringify(result));

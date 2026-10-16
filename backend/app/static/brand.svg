@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <title>Adal AI</title>
   <rect width="512" height="512" rx="104" fill="#087f7b"/>
-  <path d="M112 165c56-14 99-2 144 31 45-33 88-45 144-31v196c-57-14-101-1-144 31-43-32-87-45-144-31V165Z" fill="none" stroke="#fff" stroke-width="25" stroke-linejoin="round"/>
-  <path d="M256 198v188M159 224l48 14m-48 42 48 14m98-56 48-14m-48 70 48-14" fill="none" stroke="#fff" stroke-width="19" stroke-linecap="round"/>
-  <path d="m358 62 12 30 30 12-30 12-12 30-12-30-30-12 30-12 12-30Z" fill="#a8eee2"/>
+  <path transform="translate(0 -20)" d="M112 165c56-14 99-2 144 31 45-33 88-45 144-31v196c-57-14-101-1-144 31-43-32-87-45-144-31V165Z" fill="none" stroke="#fff" stroke-width="25" stroke-linejoin="round"/>
+  <path transform="translate(0 -20)" d="M256 198v188M159 224l48 14m-48 42 48 14m98-56 48-14m-48 70 48-14" fill="none" stroke="#fff" stroke-width="19" stroke-linecap="round"/>
+  
 </svg>

@@ -49,6 +49,7 @@ export function Composer({ value, onChange, onSubmit, busy, disabled, maxChars, 
       <div className="composer__row">
         <textarea
           id="composer-input"
+          aria-label={t.inputLabel}
           ref={inputRef}
           className="composer__input"
           rows={1}
@@ -58,7 +59,7 @@ export function Composer({ value, onChange, onSubmit, busy, disabled, maxChars, 
           onKeyDown={onKeyDown}
           disabled={disabled}
           aria-invalid={tooLong || undefined}
-          aria-describedby="composer-hint"
+          aria-describedby={tooLong || showCounter ? 'composer-hint' : undefined}
         />
         <button
           type="submit"
@@ -71,19 +72,16 @@ export function Composer({ value, onChange, onSubmit, busy, disabled, maxChars, 
           <span>{t.send}</span>
         </button>
       </div>
-      <div className="composer__meta" id="composer-hint">
-        {tooLong ? (
+      {(tooLong || showCounter) && <div className="composer__meta" id="composer-hint">
+        {tooLong && (
           <span className="composer__error">{t.tooLong(maxChars)}</span>
-        ) : (
-          <span className="composer__hint">{t.inputHint}</span>
         )}
         {showCounter && (
           <span className={tooLong ? 'composer__counter composer__counter--over' : 'composer__counter'}>
             {length} / {maxChars}
           </span>
         )}
-      </div>
-      <p className="composer__privacy">{t.privacyNote}</p>
+      </div>}
     </form>
   )
 }

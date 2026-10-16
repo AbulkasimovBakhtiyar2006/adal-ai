@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import type { ChatReply, ErrorCode } from '../api/types'
 import type { Turn } from '../chat/reducer'
 import { useI18n } from '../i18n/context'
-import { AlertIcon, InfoIcon, QuestionIcon, RetryIcon } from './Icons'
+import { AlertIcon, InfoIcon, QuestionIcon, RetryIcon, SpeakerIcon } from './Icons'
 import { SafeMarkdown } from './SafeMarkdown'
 import { Sources } from './Sources'
 
@@ -10,10 +10,13 @@ interface TurnViewProps {
   turn: Turn
   canRetry: boolean
   onRetry: (id: string) => void
+  canSpeak?: boolean
+  speaking?: boolean
+  onSpeak?: () => void
 }
 
 /** Вопрос пользователя и одно из состояний ответа: ожидание, ответ или техническая ошибка. */
-export function TurnView({ turn, canRetry, onRetry }: TurnViewProps) {
+export function TurnView({ turn, canRetry, onRetry, canSpeak, speaking, onSpeak }: TurnViewProps) {
   const { t } = useI18n()
   return (
     <li className="turn">
@@ -31,7 +34,7 @@ export function TurnView({ turn, canRetry, onRetry }: TurnViewProps) {
           {t.waiting}
         </div>
       )}
-      {turn.phase === 'done' && turn.reply && <Answer reply={turn.reply} />}
+      {turn.phase === 'done' && turn.reply && <Answer reply={turn.reply} canSpeak={canSpeak} speaking={speaking} onSpeak={onSpeak} />}
       {turn.phase === 'error' && turn.error && (
         <TechnicalError
           code={turn.error.code}
@@ -43,13 +46,14 @@ export function TurnView({ turn, canRetry, onRetry }: TurnViewProps) {
   )
 }
 
-function Answer({ reply }: { reply: ChatReply }) {
+function Answer({ reply, canSpeak, speaking, onSpeak }: { reply: ChatReply } & Pick<TurnViewProps, 'canSpeak' | 'speaking' | 'onSpeak'>) {
   const { t } = useI18n()
   const status = reply.status ?? 'answered'
   return (
     <article className={`answer answer--${status}`}>
       <header className="answer__header">
         <span className="answer__author">{t.appName}</span>
+        {canSpeak && <button className="btn btn--ghost answer__listen" onClick={onSpeak} aria-pressed={!!speaking}><SpeakerIcon />{speaking ? t.voice.stop : t.voice.listen}</button>}
       </header>
       {status === 'needs_clarification' && (
         <StateNote icon={<QuestionIcon />} title={t.statusClarification} hint={t.statusClarificationHint} />

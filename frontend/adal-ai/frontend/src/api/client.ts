@@ -9,6 +9,7 @@ import {
   type AiMode,
   type AnswerStatus,
   type ChatReply,
+  type Conversation,
   type ErrorCode,
   type HistoryTurn,
   type Lang,
@@ -121,8 +122,9 @@ export async function getConfig(): Promise<PublicConfig> {
   return { aiMode, maxMessageChars: max }
 }
 
-export async function getHistory(): Promise<HistoryTurn[]> {
-  const raw = (await request('GET', '/api/history')) as { turns?: unknown }
+export async function getHistory(conversationId?: string): Promise<HistoryTurn[]> {
+  const path = conversationId ? `/api/history?conversation_id=${encodeURIComponent(conversationId)}` : '/api/history'
+  const raw = (await request('GET', path)) as { turns?: unknown }
   if (!Array.isArray(raw.turns)) return []
   const turns: HistoryTurn[] = []
   for (const item of raw.turns) {
@@ -138,9 +140,25 @@ export async function getHistory(): Promise<HistoryTurn[]> {
 }
 
 /** clientId делает отправку идемпотентной: повтор не создаёт второй вопрос на сервере. */
-export async function sendMessage(message: string, lang: Lang, clientId: string): Promise<ChatReply> {
-  const raw = await request('POST', '/api/chat', { message, lang, client_id: clientId }, CHAT_TIMEOUT_MS)
+export async function sendMessage(message: string, lang: Lang, clientId: string, conversationId?: string): Promise<ChatReply> {
+  const raw = await request('POST', '/api/chat', { message, lang, client_id: clientId, conversation_id: conversationId }, CHAT_TIMEOUT_MS)
   return normalizeReply(raw)
+}
+
+function normalizeConversation(value: unknown): Conversation {
+  const raw = (value ?? {}) as Record<string, unknown>
+  if (typeof raw.id !== 'string' || typeof raw.title !== 'string' || typeof raw.updated_at !== 'number') throw new ApiError('INTERNAL')
+  return { id: raw.id, title: raw.title, updatedAt: raw.updated_at }
+}
+
+export async function getConversations(): Promise<Conversation[]> {
+  const raw = await request('GET', '/api/conversations') as { conversations?: unknown }
+  if (!Array.isArray(raw.conversations)) throw new ApiError('INTERNAL')
+  return raw.conversations.map(normalizeConversation)
+}
+
+export async function createConversation(): Promise<Conversation> {
+  return normalizeConversation(await request('POST', '/api/conversations'))
 }
 
 /** Новый диалог: сервер удаляет сообщения текущего разговора. */

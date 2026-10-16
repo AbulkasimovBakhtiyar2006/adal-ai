@@ -131,3 +131,67 @@ def test_built_frontend_does_not_swallow_api_errors(settings, draft):
     with TestClient(create_app(settings, FakeProviders(draft))) as client:
         assert client.get("/api/unknown").status_code == 404
         assert client.get("/admin").status_code == 200
+
+
+def test_separate_conversations_survive_restart_and_are_private(settings, sources, draft):
+    write_sources(settings, sources)
+    with TestClient(create_app(settings, FakeProviders(draft))) as client:
+        assert client.get("/api/conversations").json() == {"conversations": []}
+        first = client.post("/api/conversations").json()["id"]
+        second = client.post("/api/conversations").json()["id"]
+        body = {
+            "message": "Как рассматривается заявление?",
+            "lang": "ru",
+            "client_id": "one",
+            "conversation_id": first,
+        }
+        assert client.post("/api/chat", json=body).status_code == 200
+        assert (
+            len(client.get("/api/history", params={"conversation_id": first}).json()["turns"]) == 1
+        )
+        assert client.get("/api/history", params={"conversation_id": second}).json()["turns"] == []
+        assert client.post("/api/chat", json=body | {"conversation_id": second}).status_code == 409
+        listing = client.get("/api/conversations").json()["conversations"]
+        assert listing[0]["id"] == first and listing[0]["title"] == body["message"]
+        cookies = client.cookies
+    with TestClient(create_app(settings, FakeProviders(draft))) as client:
+        client.get("/api/conversations")
+        assert client.get("/api/history", params={"conversation_id": first}).status_code == 404
+        assert client.post("/api/chat", json=body).status_code == 404
+        client.cookies.clear()
+        client.cookies.update(cookies)
+        assert len(client.get("/api/conversations").json()["conversations"]) == 2
+        assert (
+            len(client.get("/api/history", params={"conversation_id": first}).json()["turns"]) == 1
+        )
+        assert client.delete("/api/session").status_code == 204
+        assert client.get("/api/conversations").json()["conversations"] == []
+        with client.app.state.history.connect() as db:
+            assert db.execute("SELECT COUNT(*) FROM conversations").fetchone()[0] == 0
+            assert db.execute("SELECT COUNT(*) FROM turns").fetchone()[0] == 0
+
+
+def test_existing_history_is_migrated_to_conversation(tmp_path):
+    import json
+    import sqlite3
+    import time
+
+    from app.web import HistoryStore
+
+    path = tmp_path / "legacy.sqlite"
+    with sqlite3.connect(path) as db:
+        db.executescript("""
+            CREATE TABLE sessions (id TEXT PRIMARY KEY, expires REAL NOT NULL);
+            CREATE TABLE turns (session TEXT, client_id TEXT, question TEXT,
+                                lang TEXT, reply TEXT, created REAL,
+                                PRIMARY KEY (session, client_id));
+        """)
+        db.execute("INSERT INTO sessions VALUES (?, ?)", ("browser", time.time() + 100))
+        db.execute(
+            "INSERT INTO turns VALUES (?, ?, ?, ?, ?, ?)",
+            ("browser", "one", "Старый вопрос", "ru", json.dumps({"answer": "Ответ"}), time.time()),
+        )
+    store = HistoryStore(path)
+    assert store.conversations("browser")[0]["title"] == "Старый вопрос"
+    assert store.history("browser", "default")[0]["answer"] == "Ответ"
+    assert len(HistoryStore(path).conversations("browser")) == 1

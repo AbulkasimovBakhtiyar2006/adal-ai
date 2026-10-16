@@ -15,7 +15,9 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.direct_chat import answer as direct_answer
 from app.models import AskRequest
+from app.providers import InvalidModelOutput, ProviderUnavailable
 
 COOKIE = "adal_session"
 TTL = 7 * 86400
@@ -35,6 +37,7 @@ class ChatRequest(BaseModel):
     message: str = Field(max_length=2000)
     lang: Literal["ru", "kk"]
     client_id: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,100}$")
+    conversation_id: str | None = Field(default=None, pattern=r"^[a-zA-Z0-9_-]{1,100}$")
 
 
 class HistoryStore:
@@ -44,6 +47,11 @@ class HistoryStore:
         with self.connect() as db:
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, expires REAL NOT NULL);
+                CREATE TABLE IF NOT EXISTS conversations (
+                    session TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                    id TEXT NOT NULL, title TEXT NOT NULL, updated REAL NOT NULL,
+                    PRIMARY KEY (session, id)
+                );
                 CREATE TABLE IF NOT EXISTS turns (
                     session TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
                     client_id TEXT NOT NULL, question TEXT NOT NULL, lang TEXT NOT NULL,
@@ -51,6 +59,17 @@ class HistoryStore:
                     PRIMARY KEY (session, client_id)
                 );
             """)
+            columns = {row[1] for row in db.execute("PRAGMA table_info(turns)")}
+            if "conversation_id" not in columns:
+                db.execute(
+                    "ALTER TABLE turns ADD COLUMN conversation_id TEXT NOT NULL DEFAULT 'default'"
+                )
+            # Keep chats from earlier versions visible in the conversation list.
+            db.execute("""INSERT OR IGNORE INTO conversations (session, id, title, updated)
+                SELECT t.session, t.conversation_id,
+                    (SELECT question FROM turns AS first WHERE first.session=t.session
+                     AND first.conversation_id=t.conversation_id ORDER BY created LIMIT 1),
+                    MAX(t.created) FROM turns AS t GROUP BY t.session, t.conversation_id""")
         path.chmod(0o600)
 
     @contextmanager
@@ -74,11 +93,36 @@ class HistoryStore:
             db.execute("INSERT INTO sessions VALUES (?, ?)", (key, time.time() + TTL))
             return key, token
 
-    def history(self, key):
+    def conversations(self, key):
         with self.connect() as db:
             rows = db.execute(
-                "SELECT client_id, question, reply FROM turns WHERE session=? ORDER BY created",
+                "SELECT id, title, updated FROM conversations WHERE session=? "
+                "ORDER BY updated DESC",
                 (key,),
+            ).fetchall()
+        return [
+            {"id": cid, "title": title[:100], "updated_at": updated} for cid, title, updated in rows
+        ]
+
+    def require_conversation(self, key, conversation_id):
+        with self.connect() as db:
+            if not db.execute(
+                "SELECT 1 FROM conversations WHERE session=? AND id=?", (key, conversation_id)
+            ).fetchone():
+                raise HTTPException(404, "conversation_not_found")
+
+    def create_conversation(self, key):
+        cid, now = secrets.token_urlsafe(18), time.time()
+        with self.connect() as db:
+            db.execute("INSERT INTO conversations VALUES (?, ?, '', ?)", (key, cid, now))
+        return {"id": cid, "title": "", "updated_at": now}
+
+    def history(self, key, conversation_id="default"):
+        with self.connect() as db:
+            rows = db.execute(
+                "SELECT client_id, question, reply FROM turns "
+                "WHERE session=? AND conversation_id=? ORDER BY created",
+                (key, conversation_id),
             ).fetchall()
         return [
             {"id": cid, "question": question, **json.loads(reply)} for cid, question, reply in rows
@@ -87,28 +131,40 @@ class HistoryStore:
     def previous(self, key, client_id):
         with self.connect() as db:
             return db.execute(
-                "SELECT question, lang, reply FROM turns WHERE session=? AND client_id=?",
+                "SELECT question, lang, reply, conversation_id FROM turns "
+                "WHERE session=? AND client_id=?",
                 (key, client_id),
             ).fetchone()
 
     def save(self, key, body, reply):
+        cid, now = body.conversation_id or "default", time.time()
         with self.connect() as db:
+            db.execute("INSERT OR IGNORE INTO conversations VALUES (?, ?, '', ?)", (key, cid, now))
             db.execute(
-                "INSERT INTO turns VALUES (?, ?, ?, ?, ?, ?)",
+                "UPDATE conversations SET title=CASE WHEN title='' THEN ? ELSE title END, "
+                "updated=? WHERE session=? AND id=?",
+                (body.message[:100], now, key, cid),
+            )
+            db.execute(
+                "INSERT INTO turns "
+                "(session, client_id, question, lang, reply, created, conversation_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
                     key,
                     body.client_id,
                     body.message,
                     body.lang,
                     json.dumps(reply, ensure_ascii=False),
-                    time.time(),
+                    now,
+                    cid,
                 ),
             )
             db.execute(
-                """DELETE FROM turns WHERE session=? AND client_id NOT IN (
-                SELECT client_id FROM turns WHERE session=? ORDER BY created DESC LIMIT 100
+                """DELETE FROM turns WHERE session=? AND conversation_id=? AND client_id NOT IN (
+                SELECT client_id FROM turns WHERE session=? AND conversation_id=?
+                ORDER BY created DESC LIMIT 100
             )""",
-                (key, key),
+                (key, cid, key, cid),
             )
 
     def clear(self, key, delete_session=False):
@@ -116,7 +172,10 @@ class HistoryStore:
             if delete_session:
                 db.execute("DELETE FROM sessions WHERE id=?", (key,))
             else:
-                db.execute("DELETE FROM turns WHERE session=?", (key,))
+                db.execute(
+                    "DELETE FROM turns WHERE session=? AND conversation_id='default'", (key,)
+                )
+                db.execute("DELETE FROM conversations WHERE session=? AND id='default'", (key,))
 
 
 def error(code: str, status=503):
@@ -152,14 +211,35 @@ def install_web(app, authenticate, run_ask):
         return key
 
     @router.get("/config")
-    async def config(response: Response):
+    async def config(request: Request, response: Response):
         response.headers["Cache-Control"] = "no-store"
-        return {"ai_mode": "real", "max_message_chars": 2000}
+        return {
+            "ai_mode": "real",
+            "max_message_chars": 2000,
+            "chat_mode": request.app.state.settings.web_chat_mode,
+        }
 
     @router.get("/history")
-    async def history(request: Request, response: Response):
+    async def history(request: Request, response: Response, conversation_id: str | None = None):
         key = await session(request, response)
-        return {"turns": await asyncio.to_thread(request.app.state.history.history, key)}
+        store = request.app.state.history
+        if conversation_id:
+            await asyncio.to_thread(store.require_conversation, key, conversation_id)
+        return {"turns": await asyncio.to_thread(store.history, key, conversation_id or "default")}
+
+    @router.get("/conversations")
+    async def conversations(request: Request, response: Response):
+        key = await session(request, response)
+        return {
+            "conversations": await asyncio.to_thread(request.app.state.history.conversations, key)
+        }
+
+    @router.post("/conversations")
+    async def create_conversation(request: Request, response: Response):
+        key = await session(request, response)
+        if key in request.app.state.busy_sessions:
+            return error("CONVERSATION_BUSY", 409)
+        return await asyncio.to_thread(request.app.state.history.create_conversation, key)
 
     @router.post("/chat")
     async def chat(body: ChatRequest, request: Request, response: Response):
@@ -172,11 +252,38 @@ def install_web(app, authenticate, run_ask):
             return error("CONVERSATION_BUSY", 409)
         state.busy_sessions.add(key)
         try:
+            if body.conversation_id:
+                await asyncio.to_thread(
+                    state.history.require_conversation, key, body.conversation_id
+                )
             previous = await asyncio.to_thread(state.history.previous, key, body.client_id)
             if previous:
-                if previous[:2] != (body.message, body.lang):
+                if previous[:2] != (body.message, body.lang) or previous[3] != (
+                    body.conversation_id or "default"
+                ):
                     return error("AI_BAD_RESPONSE", 409)
                 return json.loads(previous[2])
+            if state.settings.web_chat_mode == "deepseek":
+                if not state.settings.deepseek_api_key or not state.settings.deepseek_model:
+                    return error("AI_NOT_CONFIGURED")
+                if state.slots.locked():
+                    return error("RATE_LIMITED", 429)
+                try:
+                    async with state.slots, asyncio.timeout(state.settings.request_timeout_seconds):
+                        history = await asyncio.to_thread(
+                            state.history.history, key, body.conversation_id or "default"
+                        )
+                        reply = await direct_answer(
+                            state.settings, state.http, body.message, body.lang, history
+                        )
+                except TimeoutError:
+                    return error("AI_TIMEOUT")
+                except InvalidModelOutput:
+                    return error("AI_BAD_RESPONSE")
+                except ProviderUnavailable:
+                    return error("AI_FAILED")
+                await asyncio.to_thread(state.history.save, key, body, reply)
+                return reply
             try:
                 result = await run_ask(
                     AskRequest(question=body.message, language=body.lang), request

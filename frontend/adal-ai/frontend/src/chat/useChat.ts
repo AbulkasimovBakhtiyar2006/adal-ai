@@ -10,28 +10,29 @@ function newId(): string {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
-export function useChat(lang: Lang) {
+export function useChat(lang: Lang, conversationId?: string) {
   const [turns, dispatch] = useReducer(chatReducer, [])
   const busy = turns.some((turn) => turn.phase === 'pending')
 
   const deliver = useCallback(
     async (id: string, question: string) => {
       try {
-        const reply = await sendMessage(question, lang, id)
+        const reply = await sendMessage(question, lang, id, conversationId)
         dispatch({ type: 'succeeded', id, reply })
+        return reply
       } catch (err) {
         const apiError = err instanceof ApiError ? err : new ApiError('INTERNAL')
         dispatch({ type: 'failed', id, code: apiError.code, retryAfter: apiError.retryAfter })
       }
     },
-    [lang],
+    [lang, conversationId],
   )
 
   const send = useCallback(
     (question: string) => {
       const id = newId()
       dispatch({ type: 'submitted', id, question })
-      void deliver(id, question)
+      return deliver(id, question)
     },
     [deliver],
   )
@@ -41,7 +42,7 @@ export function useChat(lang: Lang) {
       const turn = turns.find((item) => item.id === id && item.phase === 'error')
       if (!turn || busy) return
       dispatch({ type: 'retried', id })
-      void deliver(id, turn.question)
+      return deliver(id, turn.question)
     },
     [turns, busy, deliver],
   )

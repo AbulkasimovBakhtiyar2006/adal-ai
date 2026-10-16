@@ -1,8 +1,9 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import { LangProvider } from './i18n/LangProvider'
+import type { Recognition } from './voice/VoiceController'
 
 interface Call {
   method: string
@@ -18,13 +19,34 @@ function json(status: number, body: unknown) {
 function fakeServer(chatResponses: Array<() => Response | Promise<Response>>) {
   const calls: Call[] = []
   const queue = [...chatResponses]
+  const conversations: Array<{ id: string; title: string; updated_at: number }> = []
+  const histories: Record<string, Array<Record<string, unknown>>> = {}
   const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     const method = init?.method ?? 'GET'
     const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : undefined
     calls.push({ method, url, body })
     if (url === '/api/config') return json(200, { ai_mode: 'mock', max_message_chars: 2000 })
-    if (url === '/api/history') return json(200, { turns: [] })
-    if (url === '/api/chat') return (queue.shift() ?? (() => json(500, {})))()
+    if (url === '/api/conversations' && method === 'GET') return json(200, { conversations })
+    if (url === '/api/conversations' && method === 'POST') {
+      const item = { id: `chat-${conversations.length + 1}`, title: '', updated_at: Date.now() / 1000 }
+      conversations.unshift(item)
+      histories[item.id] = []
+      return json(200, item)
+    }
+    if (url.startsWith('/api/history')) {
+      const id = new URL(url, 'https://local.test').searchParams.get('conversation_id') ?? 'default'
+      return json(200, { turns: histories[id] ?? [] })
+    }
+    if (url === '/api/chat') {
+      const response = await (queue.shift() ?? (() => json(500, {})))()
+      if (response.ok && body) {
+        const id = String(body.conversation_id)
+        histories[id].push({ id: body.client_id, question: body.message, ...await response.clone().json() })
+        const item = conversations.find(item => item.id === id)!
+        item.title ||= String(body.message)
+      }
+      return response
+    }
     if (method === 'DELETE') return new Response(null, { status: 204 })
     return json(404, { error: { code: 'NOT_FOUND' } })
   })
@@ -49,6 +71,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals()
+  vi.restoreAllMocks()
 })
 
 describe('App', () => {
@@ -57,11 +80,11 @@ describe('App', () => {
     const user = userEvent.setup()
     renderApp()
 
-    expect(await screen.findByRole('heading', { name: 'Задайте вопрос об официальных документах' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Разобраться в документах — проще.' })).toBeInTheDocument()
     expect(screen.getByText(/Не является официальным государственным органом/)).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: /Слышащее государство/ }))
-    expect(screen.getByLabelText('Ваш вопрос')).toHaveValue(
+    expect(await screen.findByLabelText('Ваш вопрос')).toHaveValue(
       'Объясни концепцию «Слышащее государство» по официальным источникам.',
     )
     expect(server.chatCalls()).toHaveLength(0)
@@ -72,6 +95,7 @@ describe('App', () => {
     fakeServer([() => new Promise<Response>((resolve) => (release = resolve))])
     const user = userEvent.setup()
     renderApp()
+    await user.click(await screen.findByRole('button', { name: 'Перейти в чат' }))
 
     await user.type(await screen.findByLabelText('Ваш вопрос'), 'Расскажи про закон{Enter}')
     expect(await screen.findByText('ИИ готовит ответ…')).toBeInTheDocument()
@@ -87,6 +111,7 @@ describe('App', () => {
     fakeServer([answer({ answer: 'В базе нет данных.', status: 'insufficient_information' })])
     const user = userEvent.setup()
     renderApp()
+    await user.click(await screen.findByRole('button', { name: 'Перейти в чат' }))
 
     await user.type(await screen.findByLabelText('Ваш вопрос'), 'Вопрос{Enter}')
     expect(await screen.findByText('Недостаточно подтверждённой информации')).toBeInTheDocument()
@@ -98,6 +123,7 @@ describe('App', () => {
     const server = fakeServer([() => json(502, { error: { code: 'AI_FAILED' } }), answer()])
     const user = userEvent.setup()
     renderApp()
+    await user.click(await screen.findByRole('button', { name: 'Перейти в чат' }))
 
     await user.type(await screen.findByLabelText('Ваш вопрос'), 'Один вопрос{Enter}')
     const alert = await screen.findByRole('alert')
@@ -109,7 +135,7 @@ describe('App', () => {
 
     const [first, second] = server.chatCalls()
     expect(second.body?.client_id).toBe(first.body?.client_id)
-    expect(screen.getAllByText('Один вопрос')).toHaveLength(1)
+    expect(screen.getAllByText('Тестовый ответ')).toHaveLength(1)
   })
 
   it('переключает язык интерфейса и передаёт его на сервер', async () => {
@@ -117,32 +143,97 @@ describe('App', () => {
     const user = userEvent.setup()
     renderApp()
 
-    await screen.findByRole('heading', { name: 'Задайте вопрос об официальных документах' })
+    await screen.findByRole('heading', { name: 'Разобраться в документах — проще.' })
     await user.click(screen.getByRole('button', { name: 'KZ' }))
 
-    expect(screen.getByRole('heading', { name: 'Ресми құжаттар туралы сұрақ қойыңыз' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Құжаттарды түсіну оңайырақ.' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'KZ' })).toHaveAttribute('aria-pressed', 'true')
     expect(document.documentElement.lang).toBe('kk')
 
-    await user.type(screen.getByLabelText('Сіздің сұрағыңыз'), 'Сұрақ{Enter}')
+    await user.click(screen.getByRole('button', { name: 'Чатқа өту' }))
+    await user.type(await screen.findByLabelText('Сіздің сұрағыңыз'), 'Сұрақ{Enter}')
     await screen.findByText('Тестовый ответ')
     expect(server.chatCalls()[0].body?.lang).toBe('kk')
   })
 
-  it('начинает новый диалог после подтверждения', async () => {
+  it('сохраняет старый диалог и открывает его из истории после перезагрузки', async () => {
     const server = fakeServer([answer()])
     const user = userEvent.setup()
-    renderApp()
+    const rendered = renderApp()
+    await user.click(await screen.findByRole('button', { name: 'Перейти в чат' }))
 
     await user.type(await screen.findByLabelText('Ваш вопрос'), 'Вопрос{Enter}')
     await screen.findByText('Тестовый ответ')
 
     await user.click(screen.getByRole('button', { name: 'Новый диалог' }))
-    const dialog = screen.getByRole('alertdialog')
-    await user.click(within(dialog).getByRole('button', { name: 'Начать новый' }))
+    await screen.findByRole('heading', { name: 'Что вы хотите узнать?' })
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    expect(screen.queryByText('Тестовый ответ')).toBeNull()
+    expect(server.calls.some(call => call.method === 'DELETE')).toBe(false)
+    rendered.unmount()
+    renderApp()
+    await user.click(await screen.findByRole('button', { name: /Вопрос/ }))
+    expect(await screen.findByText('Тестовый ответ')).toBeInTheDocument()
+    expect(server.chatCalls()[0].body?.conversation_id).toBe('chat-1')
+  })
+})
 
-    await waitFor(() => expect(screen.queryByText('Тестовый ответ')).toBeNull())
-    expect(screen.getByRole('heading', { name: 'Задайте вопрос об официальных документах' })).toBeInTheDocument()
-    expect(server.calls.some((call) => call.method === 'DELETE' && call.url === '/api/history')).toBe(true)
+
+describe('voice UI', () => {
+  function dialogSupport() {
+    Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value: function (this: HTMLDialogElement) { this.setAttribute('open', '') } })
+    Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value: function (this: HTMLDialogElement) { this.removeAttribute('open') } })
+  }
+  it('opens a call, sends speech to the current chat, reads and preserves the answer', async () => {
+    dialogSupport()
+    const instances: Recognition[] = []
+    class BrowserRecognition implements Recognition {
+      lang = ''; continuous = false; interimResults = false
+      onresult: Recognition['onresult'] = null
+      onerror: Recognition['onerror'] = null
+      onend: Recognition['onend'] = null
+      start = vi.fn(); abort = vi.fn()
+      constructor() { instances.push(this) }
+    }
+    const spoken: SpeechSynthesisUtterance[] = []
+    vi.stubGlobal('isSecureContext', true)
+    vi.stubGlobal('SpeechRecognition', BrowserRecognition)
+    vi.stubGlobal('SpeechSynthesisUtterance', class { text: string; constructor(text: string) { this.text = text } })
+    vi.stubGlobal('speechSynthesis', { getVoices: () => [{ lang: 'ru-RU' }], speak: (utterance: SpeechSynthesisUtterance) => spoken.push(utterance), cancel: vi.fn() })
+    const server = fakeServer([answer()])
+    const user = userEvent.setup()
+    renderApp()
+    await user.click(await screen.findByRole('button', { name: 'Перейти в чат' }))
+    await user.click(screen.getByRole('button', { name: 'Звонок ИИ' }))
+    expect(screen.getByRole('dialog', { name: 'Звонок ИИ' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Начать звонок' }))
+    act(() => {
+      instances[0].onresult?.({ results: [{ isFinal: true, 0: { transcript: 'Голосовой вопрос' } }] })
+      instances[0].onend?.()
+    })
+    await waitFor(() => expect(spoken).toHaveLength(1))
+    expect(server.chatCalls()[0].body).toMatchObject({ message: 'Голосовой вопрос', conversation_id: 'chat-1', lang: 'ru' })
+    expect(spoken[0].text).toBe('Тестовый ответ')
+    await user.click(screen.getByRole('button', { name: 'Завершить' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.getByText('Тестовый ответ')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Слушать' }))
+    expect(spoken).toHaveLength(2)
+    await user.click(screen.getByRole('button', { name: 'Остановить' }))
+    expect(screen.getByRole('button', { name: 'Слушать' })).toBeInTheDocument()
+  })
+  it('explains unavailable microphone support and keeps the text chat usable', async () => {
+    dialogSupport()
+    vi.stubGlobal('isSecureContext', true)
+    vi.stubGlobal('SpeechRecognition', undefined)
+    fakeServer([])
+    const user = userEvent.setup()
+    renderApp()
+    await user.click(await screen.findByRole('button', { name: 'Перейти в чат' }))
+    await user.click(screen.getByRole('button', { name: 'Звонок ИИ' }))
+    expect(screen.getByRole('alert')).toHaveTextContent('В этом браузере голосовой звонок недоступен')
+    expect(screen.getByRole('button', { name: 'Начать звонок' })).toBeDisabled()
+    await user.click(screen.getByRole('button', { name: 'Закрыть звонок' }))
+    expect(screen.getByLabelText('Ваш вопрос')).toBeEnabled()
   })
 })

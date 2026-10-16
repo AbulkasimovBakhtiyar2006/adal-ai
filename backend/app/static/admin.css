@@ -29,3 +29,6 @@ footer{font-size:10px;color:#749c83;border-color:var(--line);margin-top:30px;pad
 @media(prefers-reduced-motion:reduce){*{transition:none!important}}
 
 .portal-strip{background:var(--portal-blue)}
+/* Match the more readable public workspace typography. */
+body{font-size:16px}.nav-item{font-size:15px}.breadcrumb{font-size:14px}.page-heading p:last-child{font-size:16px}h2{font-size:20px}label{font-size:15px}input,select,textarea{font-size:16px}input::placeholder,textarea::placeholder{font-size:15px}.helper,small,.card-heading p{font-size:13px}.primary,.secondary,.file-button{font-size:14px}.text-button{font-size:13px}.stats span{font-size:14px}.stats small{font-size:12px}.pipeline span,details summary{font-size:14px}.doc-info strong{font-size:15px}.doc-info small,.save-bar>span{font-size:13px}.portal-strip{font-size:12px}.portal-masthead .brand small{font-size:13px}.nav-caption{font-size:11px}
+@media(max-width:800px){.nav-item{font-size:13px}.page-heading p:last-child{font-size:15px}.primary,.secondary,.file-button{font-size:14px}.stats span{font-size:12px}.doc-info strong{font-size:14px}.pipeline{flex-wrap:wrap}}

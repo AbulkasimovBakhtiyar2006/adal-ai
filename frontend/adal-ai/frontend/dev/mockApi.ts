@@ -43,10 +43,12 @@ interface Turn {
   id: string
   question: string
   reply: Reply
+  conversationId: string
 }
 
 interface Session {
   turns: Turn[]
+  conversations: Array<{ id: string; title: string; updated_at: number }>
   busy: boolean
   failedOnce: Set<string>
 }
@@ -142,7 +144,7 @@ function getSession(req: IncomingMessage, res: ServerResponse): Session {
   let sid = cookies[SESSION_COOKIE]
   if (!sid || !sessions.has(sid)) {
     sid = randomBytes(32).toString('base64url')
-    sessions.set(sid, { turns: [], busy: false, failedOnce: new Set() })
+    sessions.set(sid, { turns: [], conversations: [], busy: false, failedOnce: new Set() })
     res.setHeader('Set-Cookie', `${SESSION_COOKIE}=${sid}; HttpOnly; SameSite=Lax; Path=/api`)
   }
   return sessions.get(sid)!
@@ -184,13 +186,23 @@ async function handleChat(req: IncomingMessage, res: ServerResponse, session: Se
   const message = typeof body.message === 'string' ? body.message.trim() : ''
   const lang: Lang = body.lang === 'kk' ? 'kk' : 'ru'
   const clientId = typeof body.client_id === 'string' && body.client_id.length <= 64 ? body.client_id : null
+  const conversationId = typeof body.conversation_id === 'string' ? body.conversation_id : 'default'
+  let conversation = session.conversations.find(item => item.id === conversationId)
+  if (!conversation && conversationId !== 'default') throw new MockError(404, 'INTERNAL')
+  if (!conversation) {
+    conversation = { id: conversationId, title: '', updated_at: Date.now() / 1000 }
+    session.conversations.push(conversation)
+  }
 
   if (!message) throw new MockError(422, 'MESSAGE_EMPTY')
   if (message.length > MAX_MESSAGE_CHARS) throw new MockError(422, 'MESSAGE_TOO_LONG')
 
   // Повтор с тем же client_id не создаёт второй вопрос в истории.
   const existing = clientId ? session.turns.find((turn) => turn.id === clientId) : undefined
-  if (existing) return sendJson(res, 200, existing.reply)
+  if (existing) {
+    if (existing.conversationId !== conversationId || existing.question !== message) throw new MockError(409, 'AI_BAD_RESPONSE')
+    return sendJson(res, 200, existing.reply)
+  }
 
   if (session.busy) throw new MockError(409, 'CONVERSATION_BUSY')
   session.busy = true
@@ -208,7 +220,9 @@ async function handleChat(req: IncomingMessage, res: ServerResponse, session: Se
     }
     const reply = buildReply(message, lang)
     // Как и настоящий backend: пара «вопрос — ответ» сохраняется только при успехе.
-    session.turns.push({ id: clientId ?? randomBytes(8).toString('hex'), question: message, reply })
+    session.turns.push({ id: clientId ?? randomBytes(8).toString('hex'), question: message, reply, conversationId })
+    conversation.title ||= message.slice(0, 100)
+    conversation.updated_at = Date.now() / 1000
     sendJson(res, 200, reply)
   } finally {
     session.busy = false
@@ -225,11 +239,20 @@ export function mockApiMiddleware() {
 
     const run = async (): Promise<void> => {
       switch (route) {
+        case 'GET /api/conversations':
+          return sendJson(res, 200, { conversations: [...session.conversations].sort((a,b) => b.updated_at - a.updated_at) })
+        case 'POST /api/conversations': {
+          if (session.busy) throw new MockError(409, 'CONVERSATION_BUSY')
+          const item = { id: randomBytes(18).toString('base64url'), title: '', updated_at: Date.now() / 1000 }
+          session.conversations.push(item)
+          return sendJson(res, 200, item)
+        }
         case 'GET /api/config':
           return sendJson(res, 200, { ai_mode: 'mock', max_message_chars: MAX_MESSAGE_CHARS })
         case 'GET /api/history':
           return sendJson(res, 200, {
-            turns: session.turns.map((turn) => ({ id: turn.id, question: turn.question, ...turn.reply })),
+            turns: session.turns.filter(turn => turn.conversationId === (new URL(req.url ?? '/', 'http://localhost').searchParams.get('conversation_id') ?? 'default'))
+              .map((turn) => ({ id: turn.id, question: turn.question, ...turn.reply })),
           })
         case 'POST /api/chat':
           return handleChat(req, res, session)

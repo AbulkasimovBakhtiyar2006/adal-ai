@@ -26,6 +26,12 @@ export interface HistoryTurn {
   reply: ChatReply
 }
 
+export interface Conversation {
+  id: string
+  title: string
+  updatedAt: number
+}
+
 export interface PublicConfig {
   aiMode: AiMode
   maxMessageChars: number
