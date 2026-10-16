@@ -41,7 +41,7 @@ def test_direct_chat_without_google_or_documents_and_private_history(settings, m
         assert r.status_code == 200
         assert r.json()["verification_mode"] == "model_only"
         assert r.json()["sources"] == []
-        assert "тексерілмеген" in r.json()["answer"]
+        assert r.json()["answer"] == "Сәлем! Қалай көмектесейін?"
         assert "Kazakh" in calls[0]["messages"][0]["content"]
         assert client.post("/api/chat", json=body).json() == r.json()
         assert len(calls) == 1

@@ -9,13 +9,6 @@ from app.network_chat import answer as network_answer
 from app.providers import InvalidModelOutput, ProviderUnavailable
 from app.voice import VOICE_STYLE
 
-NOTICES = {
-    "ru": "Ответ DeepSeek без проверки по базе документов. "
-    "Важные факты нужно сверить с официальными источниками.",
-    "kk": "DeepSeek жауабы құжаттар базасы бойынша тексерілмеген. "
-    "Маңызды деректерді ресми дереккөздермен салыстырыңыз.",
-}
-
 
 async def primary_answer(
     settings: Settings,
@@ -97,7 +90,7 @@ async def primary_answer(
     except (KeyError, IndexError, AttributeError, TypeError, ValueError) as exc:
         raise InvalidModelOutput("invalid_deepseek_reply") from exc
     return {
-        "answer": f"{content.strip()}\n\n---\n*{NOTICES[lang]}*",
+        "answer": content.strip(),
         "ai_mode": "real",
         "status": "answered",
         "sources": [],
@@ -137,13 +130,8 @@ async def answer(settings, client, message, lang, history, response_mode="text",
         text = result.get("answer")
         if not isinstance(text, str) or not text.strip() or len(text) > 15000:
             raise InvalidModelOutput("invalid_fallback_reply")
-        notice = (
-            "Резервный ответ Gemini без проверки источников."
-            if lang == "ru"
-            else "Gemini қосалқы жауабы, дереккөздер тексерілмеген."
-        )
         return {
-            "answer": text.strip() + "\n\n*" + notice + "*",
+            "answer": text.strip(),
             "ai_mode": "real",
             "status": "answered",
             "sources": [],
