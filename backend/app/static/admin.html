@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Adal AI — управление</title>
+  <link rel="icon" href="/admin/assets/brand.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/admin/assets/portal.css">
+  <link rel="stylesheet" href="/admin/assets/admin.css">
+  <script src="/admin/assets/admin.js" defer></script>
+</head>
+<body>
+  <div class="portal-top" role="banner">
+    <div class="portal-strip"><span><i aria-hidden="true"></i>Информационно-справочный проект</span><span>Республика Казахстан</span></div>
+    <div class="portal-masthead"><a class="portal-brand" href="/"><img src="/admin/assets/brand.svg" width="46" height="46" alt=""><span><strong>Adal AI</strong><small>Электронный справочник</small></span></a><div class="portal-masthead-actions"><span class="workspace-label">Панель управления</span><a href="/">Открыть портал <span aria-hidden="true">↗</span></a></div></div>
+  </div>
+  <aside class="sidebar">
+    <div class="nav-caption">УПРАВЛЕНИЕ СЕРВИСОМ</div>
+    <nav aria-label="Разделы">
+      <button class="nav-item selected" data-tab="settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 17h16M8 4v6M16 14v6"/></svg>Настройки ИИ</button>
+      <button class="nav-item" data-tab="documents"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l4 4v14H6V3Zm9 0v5h4M9 12h7M9 16h7"/></svg>База знаний <b id="nav-count">0</b></button>
+      <button class="nav-item" data-tab="playground"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v12H9l-5 4V4ZM8 8h8M8 12h5"/></svg>Проверка бота</button>
+    </nav>
+    <div class="sidebar-guide"><span>ADAL QOGAM</span><p>Управляйте моделями и документами, на которые опирается сервис.</p></div>
+    <div class="sidebar-bottom"><span class="dot"></span> Локальная среда<p>Проект конкурса «Адал қоғам»<br>Русский и қазақша</p><a href="/docs" target="_blank" rel="noopener">Документация API ↗</a></div>
+  </aside>
+  <main>
+    <header><div class="breadcrumb">Управление сервисом <span>/</span> <b id="breadcrumb">Настройки ИИ</b></div><span class="badge">РАБОЧЕЕ ПРОСТРАНСТВО</span></header>
+    <div id="notice" class="notice hidden" role="status" aria-live="polite"></div>
+    <section id="unlock" class="card hidden"><h2>Доступ к управлению</h2><p>Введите ADMIN_API_KEY сервера. Ключ доступа останется только в памяти этой вкладки.</p><form id="unlock-form"><label>Ключ администратора<input id="admin-key" type="password" autocomplete="off" required></label><button class="primary">Войти</button></form></section>
+    <section class="tab" id="tab-settings">
+      <div class="page-heading"><div><p class="eyebrow">КОНФИГУРАЦИЯ СЕРВИСА</p><h1>Настройки ИИ</h1><p>Модели, ключи и правила проверки — в одном месте.</p></div><span class="pill" id="service-state">Проверяем настройки…</span></div>
+      <div class="stats"><div><span>Документов в библиотеке<small>Материалы для просмотра</small></span><strong id="stat-docs">—</strong></div><div><span>Источников включено<small>Используются в ответах</small></span><strong id="stat-active">—</strong></div><div><span>Фрагментов для поиска<small>Доступны модели</small></span><strong id="stat-chunks">—</strong></div></div>
+      <form id="settings-form">
+        <div class="two-columns">
+          <section class="card"><div class="card-heading"><span class="step">01</span><div><h2>Генерация ответа</h2><p>Выберите основную модель</p></div></div>
+            <label>Провайдер<select name="generator_provider"><option value="deepseek">DeepSeek</option><option value="gemini">Google Gemini</option></select></label>
+            <label>Модель DeepSeek<input name="deepseek_model" list="deepseek-models" placeholder="deepseek-flash"></label>
+            <label>API-ключ DeepSeek <span id="deepseek-key-state" class="field-state"></span><input name="deepseek_api_key" type="password" autocomplete="new-password" placeholder="Вставьте API-ключ"></label>
+            <div class="inline-actions"><button type="button" class="secondary" data-check="deepseek">Проверить подключение</button><button type="button" class="text-button" data-clear="deepseek_api_key">Удалить ключ</button></div>
+            <p class="helper">Этот ключ также используется критиком DeepSeek, если отдельный ключ критика не задан.</p>
+          </section>
+          <section class="card"><div class="card-heading"><span class="step">02</span><div><h2>Gemini и голосовые вопросы</h2><p>Генерация и распознавание речи</p></div></div>
+            <label>Модель Gemini<input name="gemini_model" list="gemini-models" placeholder="ID доступной вам модели"></label>
+            <label>API-ключ Gemini <span id="gemini-key-state" class="field-state"></span><input name="gemini_api_key" type="password" autocomplete="new-password" placeholder="Вставьте API-ключ"></label>
+            <label>Модель для аудио<input name="audio_model" list="gemini-models" placeholder="Пусто — использовать модель Gemini выше"></label>
+            <div class="inline-actions"><button type="button" class="secondary" data-check="gemini">Проверить подключение</button><button type="button" class="text-button" data-clear="gemini_api_key">Удалить ключ</button></div>
+            <p class="helper">Аудио расшифровывает Gemini. Для голосового ввода нужен его ключ, даже если текстовые ответы создаёт DeepSeek.</p>
+          </section>
+        </div>
+        <section class="card"><div class="card-heading"><span class="step">03</span><div><h2>Проверка перед отправкой</h2><p>Все этапы обязательны для каждого ответа</p></div><span class="pill mint">3 этапа</span></div>
+          <div class="pipeline"><span>Проверка цитат кодом</span><i>→</i><span>Google Check Grounding</span><i>→</i><span>Модель-критик</span></div>
+          <div class="two-columns compact"><label>Проект Google Cloud<input name="google_cloud_project" placeholder="your-project-id"><small>Нужны ADC credentials на сервере и доступ к Discovery Engine API.</small></label><label>Модель-критик<input name="critic_model" list="deepseek-models" placeholder="deepseek-flash"><small>Проверяет смысл, условия и соответствие вопросу.</small></label></div>
+          <div id="same-model" class="callout hidden">Генератор и критик используют одну модель. Это повторная проверка, а не независимая гарантия.</div>
+          <details><summary>Пороги и отдельный ключ критика</summary><div class="three-columns"><label>Общий балл Google<input type="number" name="grounding_support_threshold" min="0" max="1" step="0.01"></label><label>Каждое утверждение<input type="number" name="grounding_claim_threshold" min="0" max="1" step="0.01"></label><label>Подбор цитат Google<input type="number" name="grounding_citation_threshold" min="0" max="1" step="0.01"></label></div>
+            <p class="helper">Пороги требуют оценки на ваших RU/KK-вопросах. Балл не означает процент достоверности.</p>
+            <label>Отдельный API-ключ критика <span id="critic-key-state" class="field-state"></span><input name="critic_api_key" type="password" autocomplete="new-password" placeholder="Необязательно для DeepSeek"></label><button type="button" class="text-button" data-clear="critic_api_key">Удалить отдельный ключ</button>
+          </details>
+        </section>
+        <div class="save-bar"><span>Ключи хранятся на сервере и не возвращаются в браузер.</span><button class="primary" type="submit">Сохранить настройки <span>↗</span></button></div>
+      </form>
+      <datalist id="deepseek-models"></datalist><datalist id="gemini-models"></datalist>
+    </section>
+    <section class="tab hidden" id="tab-documents">
+      <div class="page-heading"><div><p class="eyebrow">ОФИЦИАЛЬНЫЕ МАТЕРИАЛЫ</p><h1>База знаний</h1><p>Загрузите документы, проверьте текст и включите их в поиск.</p></div><button class="primary" id="download-sources">Скачать официальные источники ↓</button></div>
+      <div class="callout" id="collection-status">Конституция, законы, планы развития, концепции и выступления на русском и казахском.</div>
+      <details class="card upload-card"><summary>＋ Добавить файл или вставить текст</summary><form id="upload-form">
+        <div class="two-columns"><label>Файл<input type="file" name="file" accept=".txt,.md,.pdf,.docx,.html,.htm"><small>TXT, MD, PDF с текстом, DOCX, HTML · до 12 МБ. Сканам нужен OCR.</small></label><label>Язык<select name="language"><option value="ru">Русский</option><option value="kk">Қазақша</option></select></label></div>
+        <label>Или вставьте текст<textarea name="text" rows="5" placeholder="Текст документа со всеми условиями и исключениями"></textarea></label>
+        <label>Название<input name="title" maxlength="300" placeholder="Название официального документа"></label>
+        <div class="two-columns"><label>Официальный источник<input name="url" type="url" placeholder="https://adilet.zan.kz/..."></label><label>Редакция / дата публикации<input name="revision" placeholder="Укажите после проверки первоисточника"></label></div>
+        <button class="primary">Разобрать и сохранить в библиотеку</button><p class="helper">Загруженный документ не участвует в ответах до включения после просмотра.</p>
+      </form></details>
+      <div class="library-toolbar"><input id="document-search" type="search" aria-label="Поиск документа" placeholder="Найти по названию…"><select id="document-filter" aria-label="Статус документа"><option value="all">Все статусы</option><option value="pending">На проверке</option><option value="active">В поиске</option><option value="archived">Архив</option></select><span id="document-count"></span></div>
+      <div id="document-list" class="document-list"></div>
+      <details id="collection-errors" class="card hidden"><summary>Источники, которые не удалось загрузить</summary><ul id="error-list"></ul></details>
+    </section>
+    <section class="tab hidden" id="tab-playground">
+      <div class="page-heading"><div><p class="eyebrow">ТЕСТОВЫЙ ЗАПРОС</p><h1>Проверка бота</h1><p>Пройдите тот же путь, что и пользователь вашего приложения.</p></div><span class="pill mint">RU / KK</span></div>
+      <div class="two-columns playground"><section class="card"><h2>Текст или голос</h2><form id="ask-form"><label>Язык ответа<select id="ask-language"><option value="auto">Определить автоматически</option><option value="ru">Русский</option><option value="kk">Қазақша</option></select></label><label>Вопрос<textarea id="question" rows="7" maxlength="2000" required placeholder="Например: что означает принцип «Слышащее государство»?"></textarea></label>
+      <div class="audio-controls"><button type="button" id="record" class="secondary">● Записать вопрос</button><label class="file-button">↑ Аудиофайл<input id="audio-file" type="file" accept="audio/*,.m4a,.webm"></label></div><p id="audio-status" class="helper">MP3, WAV, OGG, FLAC, M4A, WebM · до 10 МБ и 3 минут. Аудио отправляется в Gemini для расшифровки.</p><button class="primary wide" id="ask-button">Отправить на проверку →</button></form></section>
+      <section class="card answer-card"><div class="card-heading"><h2>Результат</h2><span class="pill" id="answer-state">Ожидание</span></div><p id="answer-text" class="answer-text">Здесь появится ответ после всех проверок.</p><div id="verification-stages"></div><div id="answer-sources"></div></section></div>
+    </section>
+    <footer>© Adal AI <span>Информационно-справочный проект «Адал қоғам»</span></footer>
+  </main>
+  <dialog id="document-dialog"><form method="dialog"><button class="close-dialog" aria-label="Закрыть">×</button></form><div id="dialog-notice" class="notice hidden" role="alert"></div><p class="eyebrow">ПРОСМОТР ИСТОЧНИКА</p><h2 id="detail-heading"></h2><div id="detail-meta" class="helper"></div><div id="detail-warnings" class="callout hidden"></div><details><summary>Метаданные первоисточника</summary><pre id="detail-source-meta"></pre></details><button id="download-original" class="text-button">Скачать оригинал ↓</button><pre id="document-text"></pre>
+    <form id="activate-form"><label>Название<input name="title" maxlength="300" required></label><div class="two-columns"><label>Ссылка на источник<input name="url" type="url" required></label><label>Редакция / дата публикации<input name="revision" required maxlength="200" placeholder="Проверьте в первоисточнике"></label></div><label>Язык<select name="language"><option value="ru">Русский</option><option value="kk">Қазақша</option></select></label><label class="checkbox"><input type="checkbox" name="reviewed" required>Я проверил текст, актуальность редакции, условия и исключения.</label><div class="inline-actions"><button class="primary">Включить в поиск</button><button type="button" class="secondary" id="deactivate">Исключить из поиска</button></div></form>
+  </dialog>
+</body>
+</html>

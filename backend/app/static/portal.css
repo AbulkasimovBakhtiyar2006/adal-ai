@@ -1,0 +1,17 @@
+/* Shared visual tokens used by the public portal and administration. */
+:root {
+  color-scheme: light;
+  --portal-navy: #164d4b;
+  --portal-blue: #087f7b;
+  --portal-blue-hover: #066662;
+  --portal-gold: #56bcb3;
+  --portal-bg: #f6faf9;
+  --portal-surface: #ffffff;
+  --portal-soft: #eaf7f4;
+  --portal-line: #daeae3;
+  --portal-text: #234542;
+  --portal-muted: #647f7b;
+  --portal-font: "Segoe UI", -apple-system, BlinkMacSystemFont, "Noto Sans", Arial, sans-serif;
+  --portal-radius: 8px;
+  --portal-shadow: 0 3px 14px #193b5710;
+}
