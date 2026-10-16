@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -227,6 +227,26 @@ def install_web(app, authenticate, run_ask):
             await asyncio.to_thread(store.require_conversation, key, conversation_id)
         return {"turns": await asyncio.to_thread(store.history, key, conversation_id or "default")}
 
+    @router.get("/search-suggestions/{client_id}")
+    async def search_suggestions(client_id: str, request: Request, response: Response):
+        key = await session(request, response)
+        previous = await asyncio.to_thread(request.app.state.history.previous, key, client_id)
+        html = json.loads(previous[2]).get("search_suggestions_html") if previous else None
+        if not isinstance(html, str) or not html:
+            raise HTTPException(404, "suggestions_not_found")
+        return HTMLResponse(
+            "<!doctype html><meta charset='utf-8'>" + html,
+            headers={
+                "Cache-Control": "private, no-store",
+                "Content-Security-Policy": "default-src 'none'; script-src 'none'; "
+                "style-src 'unsafe-inline'; img-src https://www.gstatic.com "
+                "https://www.google.com data:; base-uri 'none'; form-action 'none'; "
+                "frame-ancestors 'self'; sandbox allow-popups allow-popups-to-escape-sandbox",
+                "X-Content-Type-Options": "nosniff",
+                "Referrer-Policy": "no-referrer",
+            },
+        )
+
     @router.get("/conversations")
     async def conversations(request: Request, response: Response):
         key = await session(request, response)
@@ -264,7 +284,9 @@ def install_web(app, authenticate, run_ask):
                     return error("AI_BAD_RESPONSE", 409)
                 return json.loads(previous[2])
             if state.settings.web_chat_mode == "deepseek":
-                if not state.settings.deepseek_api_key or not state.settings.deepseek_model:
+                if (
+                    not state.settings.deepseek_api_key or not state.settings.deepseek_model
+                ) and not (state.settings.web_search_enabled and state.settings.gemini_api_key):
                     return error("AI_NOT_CONFIGURED")
                 if state.slots.locked():
                     return error("RATE_LIMITED", 429)
@@ -282,6 +304,8 @@ def install_web(app, authenticate, run_ask):
                     return error("AI_BAD_RESPONSE")
                 except ProviderUnavailable:
                     return error("AI_FAILED")
+                if reply.get("search_suggestions_html"):
+                    reply["search_suggestions_url"] = f"/api/search-suggestions/{body.client_id}"
                 await asyncio.to_thread(state.history.save, key, body, reply)
                 return reply
             try:

@@ -107,6 +107,9 @@ export function normalizeReply(value: unknown): ChatReply {
   const raw = (value ?? {}) as Record<string, unknown>
   if (typeof raw.answer !== 'string' || !raw.answer.trim()) throw new ApiError('AI_BAD_RESPONSE')
   return {
+    ...(typeof raw.search_suggestions_url === 'string' &&
+      /^\/api\/search-suggestions\/[a-zA-Z0-9_-]{1,100}$/.test(raw.search_suggestions_url)
+      ? { searchSuggestionsUrl: raw.search_suggestions_url } : {}),
     answer: raw.answer,
     sources: normalizeSources(raw.sources),
     status: STATUSES.includes(raw.status as AnswerStatus) ? (raw.status as AnswerStatus) : null,

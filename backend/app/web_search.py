@@ -29,6 +29,25 @@ ADAL_PAGES = [
     "bilim-beru-uyymdaryndagy-tarbie-zhumysynyn-negizine-aynalady-29885",
 ]
 
+TAZA_PAGES = [
+    "https://primeminister.kz/ru/news/pravitelstvo-utverdilo-kontseptsiyu-taza-kazakstan-"
+    "po-razvitiyu-ekologicheskoy-kultury-na-2024-2029-gody-29295",
+    "https://primeminister.kz/ru/news/taza-kazakstan-kak-obshchenacionalnaya-iniciativa-"
+    "prezidenta-menyaet-podhod-k-ekologii-i-blagoustroystvu-31801",
+]
+
+
+def fallback_urls(query):
+    topic = query.lower().replace("қ", "к")
+    urls = []
+    if "адал" in topic and "азамат" in topic:
+        urls += ADAL_PAGES
+    if "болашак" in topic or "bolashak" in topic:
+        urls += ["https://bolashak.gov.kz/ru/o-stipendii", "https://bolashak.gov.kz/ru"]
+    if "таза" in topic or "taza" in topic:
+        urls += TAZA_PAGES
+    return urls
+
 
 def safe_url(url: str) -> bool:
     try:
@@ -125,8 +144,7 @@ async def search(client: httpx.AsyncClient, query: str) -> list[dict]:
         except (httpx.HTTPError, ValueError, etree.XMLSyntaxError, TimeoutError):
             continue
     # Known Ministry pages are fetched live, also when search is temporarily unavailable.
-    if "адал" in query.lower() and "азамат" in query.lower():
-        urls = ADAL_PAGES + urls
+    urls = fallback_urls(query) + urls
     urls = list(dict.fromkeys(u for u in urls if safe_url(u)))[:5]
 
     async def fetch(url):

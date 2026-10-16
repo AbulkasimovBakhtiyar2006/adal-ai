@@ -13,6 +13,7 @@ export interface Source {
 }
 
 export interface ChatReply {
+  searchSuggestionsUrl?: string
   answer: string
   sources: Source[]
   /** null — ИИ-модуль не передал статус; характер ответа не угадывается. */

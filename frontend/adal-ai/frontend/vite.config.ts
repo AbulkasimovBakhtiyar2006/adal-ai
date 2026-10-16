@@ -74,8 +74,8 @@ export default defineConfig({
         start_url: '/',
         scope: '/',
         display: 'standalone',
-        background_color: '#f6faf9',
-        theme_color: '#087f7b',
+        background_color: '#ffffff',
+        theme_color: '#2855a6',
         icons: [
           { src: 'pwa-64x64.png', sizes: '64x64', type: 'image/png' },
           { src: 'pwa-192x192.png', sizes: '192x192', type: 'image/png' },
@@ -88,7 +88,7 @@ export default defineConfig({
         clientsClaim: true,
         // Кэшируется только статика интерфейса. Ответы /api/* (история, сообщения)
         // в кэш не попадают: правил runtimeCaching нет, запросы идут в сеть.
-        globPatterns: ['**/*.{js,css,html,svg,png,ico}'],
+        globPatterns: ['**/*.{js,css,html,svg,png,jpg,ico}'],
         navigateFallback: '/index.html',
         navigateFallbackDenylist: [
           /^\/api(?:\/|$)/,

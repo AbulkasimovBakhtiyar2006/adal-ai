@@ -76,3 +76,12 @@ describe('sendMessage', () => {
     await expect(sendMessage('Q', 'ru', 'id')).rejects.toMatchObject({ code: 'NETWORK' })
   })
 })
+
+it('only accepts private local Google Search suggestion frames', () => {
+  const base = { answer: 'Ответ', sources: [] }
+  expect(normalizeReply({ ...base, search_suggestions_url: '/api/search-suggestions/chat_1' }).searchSuggestionsUrl)
+    .toBe('/api/search-suggestions/chat_1')
+  for (const url of ['https://evil.example/', '//evil.example/', '/api/search-suggestions/../admin', 'javascript:alert(1)']) {
+    expect(normalizeReply({ ...base, search_suggestions_url: url }).searchSuggestionsUrl).toBeUndefined()
+  }
+})

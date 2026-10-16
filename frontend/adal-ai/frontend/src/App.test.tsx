@@ -75,6 +75,29 @@ afterEach(() => {
 })
 
 describe('App', () => {
+  it('переносит вопрос с главной в чат для отправки', async () => {
+    const server = fakeServer([])
+    const user = userEvent.setup()
+    renderApp()
+    await user.type(await screen.findByLabelText('Вопрос ИИ-консультанту'), 'Что такое гражданское общество?')
+    await user.click(screen.getByRole('button', { name: 'Задать вопрос' }))
+    expect(await screen.findByLabelText('Ваш вопрос')).toHaveValue('Что такое гражданское общество?')
+    expect(server.chatCalls()).toHaveLength(0)
+  })
+
+  it('выбирает тему документа и закрывает историю по Escape', async () => {
+    fakeServer([])
+    const user = userEvent.setup()
+    renderApp()
+    await user.click(await screen.findByRole('button', { name: 'История чатов' }))
+    expect(screen.getByRole('button', { name: 'История чатов' })).toHaveAttribute('aria-expanded', 'true')
+    await user.keyboard('{Escape}')
+    expect(screen.getByRole('button', { name: 'История чатов' })).toHaveAttribute('aria-expanded', 'false')
+    await user.click(await screen.findByRole('button', { name: 'Документы' }))
+    await user.click(screen.getByRole('button', { name: /Конституция и законы:/ }))
+    expect(await screen.findByLabelText('Ваш вопрос')).toHaveValue('Помоги разобраться в структуре Конституции Республики Казахстан.')
+  })
+
   it('показывает главную страницу и примеры как подсказки', async () => {
     const server = fakeServer([])
     const user = userEvent.setup()
@@ -172,6 +195,7 @@ describe('App', () => {
     expect(server.calls.some(call => call.method === 'DELETE')).toBe(false)
     rendered.unmount()
     renderApp()
+    await user.click(await screen.findByRole('button', { name: 'История чатов' }))
     await user.click(await screen.findByRole('button', { name: /Вопрос/ }))
     expect(await screen.findByText('Тестовый ответ')).toBeInTheDocument()
     expect(server.chatCalls()[0].body?.conversation_id).toBe('chat-1')

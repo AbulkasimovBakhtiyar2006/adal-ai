@@ -25,6 +25,14 @@ export const PlusIcon = () => (
   </Icon>
 )
 
+export const SearchIcon = () => <Icon><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 5 5" /></Icon>
+export const MenuIcon = () => <Icon><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M9 4v16M13 9h4M13 13h4" /></Icon>
+export const BookIcon = () => <Icon><path d="M12 5v15M3 4h5a4 4 0 0 1 4 3 4 4 0 0 1 4-3h5v15h-5a4 4 0 0 0-4 2 4 4 0 0 0-4-2H3V4Z" /></Icon>
+export const BuildingIcon = () => <Icon><path d="m3 8 9-5 9 5H3ZM5 10v8M10 10v8M14 10v8M19 10v8M3 21h18" /></Icon>
+export const LeafIcon = () => <Icon><path d="M20 3C8 2 3 7 5 14s13 7 15-11ZM4 21 16 9" /></Icon>
+export const ChatIcon = () => <Icon><path d="M21 11a9 9 0 0 1-9 9H4l-2 2V11a9 9 0 0 1 19 0ZM7 10h10M7 14h6" /></Icon>
+export const HomeIcon = () => <Icon><path d="m3 10 9-7 9 7M5 9v12h14V9M9 21v-7h6v7" /></Icon>
+
 export const MicIcon = () => <Icon><rect x="9" y="2" width="6" height="12" rx="3" /><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8" /></Icon>
 export const PhoneIcon = () => <Icon><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 2 .7 2.9a2 2 0 0 1-.5 2.1L8 10a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.5c.9.3 1.9.6 2.9.7a2 2 0 0 1 1.7 2Z" /></Icon>
 export const SpeakerIcon = () => <Icon><path d="m11 5-6 4H2v6h3l6 4V5ZM15 8a6 6 0 0 1 0 8M18 5a10 10 0 0 1 0 14" /></Icon>

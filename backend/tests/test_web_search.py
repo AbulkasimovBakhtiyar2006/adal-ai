@@ -2,9 +2,9 @@ import json
 
 import httpx
 import pytest
+from pydantic import SecretStr
 
 from app import network_chat
-from app.providers import InvalidModelOutput
 from app.web_search import download, safe_url, search
 
 
@@ -120,6 +120,7 @@ async def test_network_answer_uses_actual_source_and_context(settings, monkeypat
     "bad",
     [
         {"answer": "Факт [99]", "source_ids": [1]},
+        {"answer": "Факт [1, 99]", "source_ids": [1]},
         {"answer": "Факт", "source_ids": [99]},
         {"answer": "https://invented.example", "source_ids": [1]},
         {"answer": "Факт", "source_ids": [True]},
@@ -134,8 +135,11 @@ async def test_rejects_invented_citations(settings, monkeypatch, bad):
 
     monkeypatch.setattr(network_chat, "search", find)
     monkeypatch.setattr(network_chat, "completion", complete)
-    with pytest.raises(InvalidModelOutput):
-        await network_chat.answer(settings, None, "Программа?", "ru", [])
+    settings.gemini_api_key = SecretStr("")
+    reply = await network_chat.answer(settings, None, "Программа?", "ru", [])
+    assert reply["verification_mode"] == "source_excerpts"
+    assert "[99]" not in reply["answer"]
+    assert "invented.example" not in reply["answer"]
 
 
 @pytest.mark.asyncio
@@ -180,4 +184,17 @@ async def test_empty_search_retries_topic_without_generic_words():
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         sources = await search(client, "стипендия Болашак")
     assert queries == ["стипендия Болашак site:gov.kz", "Болашак"]
-    assert len(sources) == 1
+    assert len(sources) == 3
+    assert any(s["url"] == "https://www.gov.kz/article/123" for s in sources)
+
+
+def test_grouped_citations_are_validated_and_linked():
+    reply = network_chat.render(
+        {"answer": "Факт [1, 2]", "source_ids": [1, 2]},
+        [SOURCE, {**SOURCE, "id": 2, "url": "https://www.gov.kz/second"}],
+        "ru",
+        "2026-10-16",
+    )
+    assert "[1, 2]" not in reply["answer"]
+    assert "[2](https://www.gov.kz/second)" in reply["answer"]
+    assert len(reply["sources"]) == 2

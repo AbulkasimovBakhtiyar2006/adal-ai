@@ -1,31 +1,38 @@
 import { useRef } from 'react'
 import type { Lang } from '../api/types'
 import { useI18n } from '../i18n/context'
-import { DotsIcon } from './Icons'
+import { DotsIcon, MenuIcon } from './Icons'
 
 interface HeaderProps {
   onHome: () => void
+  onStart: () => void
+  onSection: (section: string) => void
   onToggleHistory: () => void
   historyOpen: boolean
   onDeleteData: () => void
   disabled: boolean
+  view: 'home' | 'chat'
 }
 const LANGS: Lang[] = ['ru', 'kk']
 
-export function Header({ onHome, onToggleHistory, historyOpen, onDeleteData, disabled }: HeaderProps) {
+export function Header({ onHome, onStart, onSection, onToggleHistory, historyOpen, onDeleteData, disabled, view }: HeaderProps) {
   const { t, lang, setLang } = useI18n()
   const menuRef = useRef<HTMLDetailsElement>(null)
-  return (
+  return <>
+    <div className="utility-bar"><span>{t.portalCountry}</span><span>{t.projectLabel}</span></div>
     <header className="header">
       <button className="header__brand" onClick={onHome} disabled={disabled} aria-label={`${t.appName} — ${t.home}`}>
-        <img src="/logo.svg" width="40" height="40" alt="" className="header__logo" />
-        <span className="header__name">{t.appName}</span>
+        <img src="/kazakhstan-emblem.jpg" width="48" height="50" alt={t.portal.emblem} className="header__logo" />
+        <span className="header__text"><span className="header__name">Adal <b>AI</b></span><span className="header__tagline">{t.portalLabel}</span></span>
       </button>
-      <span className="header__tagline">{t.serviceLabel}</span>
+      <nav className="header__nav" aria-label={t.portal.navigation}>
+        <button disabled={disabled} aria-current={view === 'home' ? 'page' : undefined} onClick={onHome}>{t.home}</button>
+        <button disabled={disabled} aria-current={view === 'chat' ? 'page' : undefined} onClick={onStart}>{t.consultant}</button>
+        <button disabled={disabled} onClick={() => onSection('topics')}>{t.portal.topics}</button>
+        <button disabled={disabled} onClick={() => onSection('resources')}>{t.portal.resources}</button>
+      </nav>
       <div className="header__actions">
-        <button className="btn btn--ghost history-toggle" aria-label={t.chatHistory} aria-expanded={historyOpen} aria-controls="chat-sidebar" onClick={onToggleHistory}>
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d="M4 5h16v12H9l-5 4V5Z"/><path d="M8 9h8M8 13h5"/></svg>
-        </button>
+        <button className="btn btn--ghost history-toggle" aria-label={t.chatHistory} aria-expanded={historyOpen} aria-controls="chat-sidebar" onClick={onToggleHistory}><MenuIcon /></button>
         <div className="lang-switch" role="group" aria-label={t.langSwitchLabel}>
           {LANGS.map(code => <button key={code} className="lang-switch__option" aria-pressed={lang === code} lang={code} onClick={() => setLang(code)}>{code === 'kk' ? 'KZ' : 'RU'}</button>)}
         </div>
@@ -41,5 +48,5 @@ export function Header({ onHome, onToggleHistory, historyOpen, onDeleteData, dis
         </details>
       </div>
     </header>
-  )
+  </>
 }

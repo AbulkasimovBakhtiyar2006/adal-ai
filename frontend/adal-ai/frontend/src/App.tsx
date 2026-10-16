@@ -5,7 +5,7 @@ import { useChat } from './chat/useChat'
 import { Composer } from './components/Composer'
 import { ConfirmDialog } from './components/ConfirmDialog'
 import { Header } from './components/Header'
-import { PhoneIcon, PlusIcon } from './components/Icons'
+import { BookIcon, ChatIcon, HomeIcon, PhoneIcon, PlusIcon } from './components/Icons'
 import { VoiceCall } from './components/VoiceCall'
 import { useVoice } from './voice/useVoice'
 import { TurnView } from './components/TurnView'
@@ -61,6 +61,17 @@ export default function App() {
   useEffect(() => {
     if (view === 'chat' && !switching) inputRef.current?.focus()
   }, [view, switching, activeId])
+  useEffect(() => {
+    if (!sidebarOpen) return
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setSidebarOpen(false)
+        document.querySelector<HTMLButtonElement>('.history-toggle')?.focus()
+      }
+    }
+    document.addEventListener('keydown', closeOnEscape)
+    return () => document.removeEventListener('keydown', closeOnEscape)
+  }, [sidebarOpen])
 
   const ready = boot.phase === 'ready'
   const locked = chat.busy || switching || !ready
@@ -129,37 +140,53 @@ export default function App() {
     finally { setSwitching(false) }
   }
   const activeChat = conversations.find(item => item.id === activeId)
-  return <div className={`app workspace ${sidebarOpen ? 'workspace--history-open' : ''}`}>
+  const goHome = () => {
+    setView('home'); setSidebarOpen(false)
+    requestAnimationFrame(() => document.querySelector('.home-scroll')?.scrollTo({ top: 0 }))
+  }
+  const goSection = (section: string) => {
+    setView('home'); setSidebarOpen(false)
+    requestAnimationFrame(() => {
+      const target = document.getElementById(section)
+      target?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      target?.focus({ preventScroll: true })
+    })
+  }
+  return <div className={`app workspace workspace--${view} ${sidebarOpen ? 'workspace--history-open' : ''}`}>
     <a className="skip-link" href="#workspace-main">{view === 'home' ? t.home : t.inputLabel}</a>
-    <div className="top"><Header onHome={() => setView('home')} disabled={locked}
+    <div className="top"><Header onHome={goHome} disabled={locked} view={view}
+      onStart={() => { if (activeId) { setView('chat'); setSidebarOpen(false) } else void startChat() }} onSection={goSection}
       onToggleHistory={() => setSidebarOpen(open => !open)} historyOpen={sidebarOpen}
       onDeleteData={() => setConfirmDelete(true)} /></div>
-    <aside className="chat-sidebar" id="chat-sidebar" aria-label={t.chatHistory}>
+    {sidebarOpen && <button className="sidebar-backdrop" aria-label={t.closeHistory} onClick={() => setSidebarOpen(false)} />}
+    <aside className="chat-sidebar" id="chat-sidebar" aria-label={t.chatHistory} hidden={view === 'home' && !sidebarOpen}>
+      <p className="sidebar-caption">{t.portal.sidebarCaption}</p>
       <button className="btn btn--primary sidebar-new" disabled={locked} onClick={() => void startChat()}><PlusIcon />{t.newChat}</button>
-      <button className={`sidebar-home ${view === 'home' ? 'is-active' : ''}`} disabled={locked} onClick={() => { setView('home'); setSidebarOpen(false) }}>{t.home}</button>
+      <button className="sidebar-home" disabled={locked} onClick={goHome}><HomeIcon />{t.portal.returnToPortal}</button>
+      <button className="sidebar-home" disabled={locked} onClick={() => goSection('resources')}><BookIcon />{t.portal.resources}</button>
       <div className="sidebar-heading"><h2>{t.chatHistory}</h2><span>{conversations.length}</span></div>
       <nav className="chat-list" aria-label={t.chatHistory}>
         {conversations.length === 0 && <p className="sidebar-empty">{t.noChats}</p>}
         {conversations.map(item => <button key={item.id} disabled={locked}
           aria-current={view === 'chat' && activeId === item.id ? 'page' : undefined}
           title={item.title || t.newChat} onClick={() => void openChat(item.id)}>
-          <span>{item.title || t.newChat}</span>
+          <ChatIcon /><span>{item.title || t.newChat}</span>
           <time dateTime={new Date(item.updatedAt * 1000).toISOString()}>{new Date(item.updatedAt * 1000).toLocaleDateString(lang === 'kk' ? 'kk-KZ' : 'ru-RU', { day: '2-digit', month: '2-digit' })}</time>
         </button>)}
       </nav>
-      <div className="sidebar-footer"><p>{t.historyHint}</p><a href="/admin">{t.management}<span aria-hidden="true">↗</span></a></div>
+      <div className="sidebar-footer"><div className="sidebar-project"><span>A</span><div><strong>{t.portal.sidebarProject}</strong><small>{t.portal.sidebarProjectHint}</small></div></div><p>{t.historyHint}</p><a href="/admin">{t.management}<span aria-hidden="true">↗</span></a></div>
     </aside>
-    <main className="workspace-main" id="workspace-main" tabIndex={-1} aria-busy={switching}>
+    <main className="workspace-main" id="workspace-main" tabIndex={-1} aria-busy={switching} inert={sidebarOpen}>
       {!online && <div className="banner banner--offline" role="status">{t.offline}</div>}
       {actionFailed && <div className="banner banner--error" role="alert">{t.actionFailed}<button className="btn btn--ghost" onClick={() => void refreshList()}>{t.reload}</button></div>}
       {boot.phase === 'loading' && <p className="thread__status">{t.loadingHistory}</p>}
       {boot.phase === 'error' && <div className="answer answer--error" role="alert"><h2>{t.configLoadError}</h2><p>{t.errors[boot.code]}</p><button className="btn btn--secondary" onClick={() => { setBoot({ phase: 'loading' }); setLoadAttempt(n => n + 1) }}>{t.reload}</button></div>}
-      {ready && view === 'home' && <div className="home-scroll"><Welcome disabled={locked} onStart={() => void startChat()} onPickExample={text => void startChat(text)} /></div>}
+      {ready && view === 'home' && <div className="home-scroll"><Welcome disabled={locked} maxChars={boot.config.maxMessageChars} onStart={() => void startChat()} onPickExample={text => void startChat(text)} /></div>}
       {ready && view === 'chat' && <>
-        <div className="chat-heading"><h1>{activeChat?.title || t.newChat}</h1><button className="btn btn--secondary voice-launch" disabled={locked || !online} onClick={() => { voice.controller.end(); setVoiceOpen(true) }}><PhoneIcon />{t.voice.title}</button></div>
+        <div className="chat-heading"><div><h1>{activeChat?.title || t.consultant}</h1><p>{t.portal.chatSubtitle}</p></div><button className="btn btn--secondary voice-launch" disabled={locked || !online} onClick={() => { voice.controller.end(); setVoiceOpen(true) }}><PhoneIcon />{t.voice.title}</button></div>
         <div className="chat-scroll" ref={scrollRef}>
           <div className="thread">
-            {chat.turns.length === 0 ? <section className="empty-chat"><h2>{t.emptyChatTitle}</h2><p>{t.emptyChatText}</p><Examples onPick={pickExample} disabled={locked} /></section> :
+            {chat.turns.length === 0 ? <section className="empty-chat"><span className="empty-chat__mark"><BookIcon /></span><p className="eyebrow">ADAL AI · {t.portalCountry}</p><h2>{t.emptyChatTitle}</h2><p>{t.portal.chatDescription}</p><Examples onPick={pickExample} disabled={locked} /></section> :
               <ol className="turns" aria-live="polite">{chat.turns.map(turn => <TurnView key={turn.id} turn={turn} canRetry={turn.id === lastTurn?.id && !locked}
                 canSpeak={voice.controller.canSpeak} speaking={voice.state.speakingId === turn.id}
                 onSpeak={() => { if (turn.reply) voice.controller.read(turn.id, turn.reply.answer) }}
@@ -169,6 +196,7 @@ export default function App() {
         <footer className="composer-area"><Composer value={draft} onChange={setDraft} onSubmit={submit} busy={chat.busy} disabled={switching}
           maxChars={boot.config.maxMessageChars} inputRef={inputRef} />
           {!voiceOpen && voice.state.error && <p className="voice-error" role="alert">{t.voice.errors[voice.state.error]}</p>}
+          <p className="composer-footnote">{t.portal.chatFootnote}</p>
         </footer>
       </>}
     </main>

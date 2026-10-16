@@ -63,6 +63,16 @@ function Answer({ reply, canSpeak, speaking, onSpeak }: { reply: ChatReply } & P
       )}
       <SafeMarkdown text={reply.answer} />
       <Sources sources={reply.sources} />
+      {reply.searchSuggestionsUrl && (
+        <iframe
+          title="Google Search"
+          src={reply.searchSuggestionsUrl}
+          sandbox="allow-popups allow-popups-to-escape-sandbox"
+          width="100%"
+          height="100"
+          className="search-suggestions"
+        />
+      )}
     </article>
   )
 }
