@@ -249,6 +249,16 @@ export function mockApiMiddleware() {
         }
         case 'GET /api/config':
           return sendJson(res, 200, { ai_mode: 'mock', max_message_chars: MAX_MESSAGE_CHARS, guest_local: true, user: null, google_client_id: null })
+        case 'GET /api/knowledge':
+          return sendJson(res, 200, {
+            mode: 'deepseek', web_search: true, models: ['DeepSeek', 'Gemini · Google Search'],
+            sites: [{ host: 'akorda.kz', title: 'Акорда · Президент Республики Казахстан', url: 'https://akorda.kz' }, { host: 'adilet.zan.kz', title: 'Әділет · база нормативных правовых актов', url: 'https://adilet.zan.kz' }],
+            topics: [{ id: 'bolashak', title: 'Болашак', urls: ['https://bolashak.gov.kz/ru/o-stipendii'] }],
+            documents: [
+              { id: 'Z1500000410-ru', kind: 'adilet', title: 'Противодействие коррупции', language: 'ru', url: 'https://adilet.zan.kz/rus/docs/Z1500000410', status: 'indexed' },
+              { id: 'constitution-2026-ru', kind: 'akorda', title: 'Конституция Республики Казахстан · 2026', language: 'ru', url: 'https://www.akorda.kz/ru/konstituciya-respubliki-kazahstan-3053339', status: 'source' },
+            ],
+          })
         case 'GET /api/history':
           return sendJson(res, 200, {
             turns: session.turns.filter(turn => turn.conversationId === (new URL(req.url ?? '/', 'http://localhost').searchParams.get('conversation_id') ?? 'default'))

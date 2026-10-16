@@ -210,11 +210,20 @@ class GameRooms:
         game.phase_started = self.clock()
 
     def reveal(self, game: Game):
+        # Points are settled here, not on answer, so scores and streaks can't leak the key.
         game.phase = "reveal"
         game.phase_started = self.clock()
+        question = game.questions[game.index]
         for player in game.players.values():
-            if game.index not in player.answers:
+            answer = player.answers.get(game.index)
+            if answer is None or answer[0] != question.correct:
                 player.streak = 0
+                continue
+            player.streak += 1
+            player.correct += 1
+            earned = points_for(answer[2], game.seconds, player.streak)
+            player.score += earned
+            player.answers[game.index] = (answer[0], earned, answer[2])
 
     def finish(self, game: Game):
         game.phase = "finished"
@@ -277,19 +286,10 @@ class GameRooms:
             raise HTTPException(409, "question_closed")
         if game.index in player.answers:
             raise HTTPException(409, "already_answered")
-        question = game.questions[game.index]
-        if body.choice >= len(question.options):
+        if body.choice >= len(game.questions[game.index].options):
             raise HTTPException(422, "invalid_choice")
         elapsed = self.clock() - game.phase_started
-        if body.choice == question.correct:
-            player.streak += 1
-            player.correct += 1
-            earned = points_for(elapsed, game.seconds, player.streak)
-        else:
-            player.streak = 0
-            earned = 0
-        player.score += earned
-        player.answers[game.index] = (body.choice, earned, elapsed)
+        player.answers[game.index] = (body.choice, 0, elapsed)
         game.touched = self.clock()
         self.advance(game)
 

@@ -3,6 +3,8 @@ import type { Lang } from '../api/types'
 import { useI18n } from '../i18n/context'
 import { Wordmark } from './Wordmark'
 import { experienceCopy } from '../experience/content'
+import { gamesCopy } from '../games/copy'
+import { knowledgeCopy } from '../knowledge/copy'
 import { DotsIcon, MenuIcon, SettingsIcon, SunIcon, MoonIcon } from './Icons'
 
 import type { ColorTheme } from '../experience/useAppearance'
@@ -18,11 +20,13 @@ interface HeaderProps {
   historyOpen: boolean
   onDeleteData: () => void
   disabled: boolean
-  view: 'home' | 'chat'
+  view: 'home' | 'chat' | 'games' | 'knowledge'
+  onGames: () => void
+  onKnowledge: () => void
 }
 const LANGS: Lang[] = ['ru', 'kk']
 
-export function Header({ theme, onTheme, onSettings, onHome, onStart, onSection, onToggleHistory, historyOpen, onDeleteData, disabled, view }: HeaderProps) {
+export function Header({ theme, onTheme, onSettings, onHome, onStart, onSection, onToggleHistory, historyOpen, onDeleteData, disabled, view, onGames, onKnowledge }: HeaderProps) {
   const { t, lang, setLang } = useI18n()
   const menuRef = useRef<HTMLDetailsElement>(null)
   return <>
@@ -35,6 +39,8 @@ export function Header({ theme, onTheme, onSettings, onHome, onStart, onSection,
       <nav className="header__nav" aria-label={t.portal.navigation}>
         <button disabled={disabled} aria-current={view === 'home' ? 'page' : undefined} onClick={onHome}>{t.home}</button>
         <button disabled={disabled} aria-current={view === 'chat' ? 'page' : undefined} onClick={onStart}>{t.consultant}</button>
+        <button disabled={disabled} aria-current={view === 'games' ? 'page' : undefined} onClick={onGames}>{gamesCopy[lang].nav}</button>
+        <button disabled={disabled} aria-current={view === 'knowledge' ? 'page' : undefined} onClick={onKnowledge}>{knowledgeCopy[lang].nav}</button>
         <button disabled={disabled} onClick={() => onSection('topics')}>{t.portal.topics}</button>
         <button disabled={disabled} onClick={() => onSection('resources')}>{t.portal.resources}</button>
       </nav>
@@ -50,6 +56,10 @@ export function Header({ theme, onTheme, onSettings, onHome, onStart, onSection,
         <details className="menu" ref={menuRef}>
           <summary className="btn btn--ghost btn--icon" aria-label={t.menu}><DotsIcon /></summary>
           <div className="menu__popover">
+            <button className="menu__item menu__item--plain" disabled={disabled} onClick={() => {
+              if (menuRef.current) menuRef.current.open = false
+              onKnowledge()
+            }}>{knowledgeCopy[lang].nav}</button>
             <a className="menu__item" href="/admin">{t.management}</a>
             <button className="menu__item" disabled={disabled} onClick={() => {
               if (menuRef.current) menuRef.current.open = false

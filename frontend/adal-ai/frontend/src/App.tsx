@@ -17,6 +17,10 @@ import type { CharacterId } from './experience/content'
 import { AppearanceSettings } from './components/AppearanceSettings'
 import { CharacterProfile, CharacterCompanion } from './components/Characters'
 import { useI18n } from './i18n/context'
+import { GamesHub, type GameEntry } from './games/GamesHub'
+import { KnowledgeBase } from './knowledge/KnowledgeBase'
+
+const linkedGame = new URLSearchParams(location.search).get('game') ?? undefined
 
 function mergeConversations(current: Conversation[], incoming: Conversation[]): Conversation[] {
   const items = new Map(current.map(item => [item.id, item]))
@@ -44,7 +48,8 @@ export default function App() {
   const [historyLoading, setHistoryLoading] = useState(true)
   const [historyFailed, setHistoryFailed] = useState(false)
   const [activeId, setActiveId] = useState<string>()
-  const [view, setView] = useState<'home' | 'chat'>('home')
+  const [view, setView] = useState<'home' | 'chat' | 'games' | 'knowledge'>(linkedGame ? 'games' : 'home')
+  const [games, setGames] = useState<{ entry?: GameEntry; code?: string; key: number }>({ code: linkedGame, key: 0 })
   const [switching, setSwitching] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [draft, setDraft] = useState('')
@@ -214,6 +219,10 @@ export default function App() {
     setView('home'); setSidebarOpen(false)
     requestAnimationFrame(() => document.querySelector('.home-scroll')?.scrollTo({ top: 0 }))
   }
+  const openGames = (entry?: GameEntry) => {
+    setGames(current => ({ entry, key: current.key + 1 })); setView('games'); setSidebarOpen(false)
+  }
+  const openKnowledge = () => { setView('knowledge'); setSidebarOpen(false) }
   const goSection = (section: string) => {
     setView('home'); setSidebarOpen(false)
     requestAnimationFrame(() => {
@@ -226,10 +235,10 @@ export default function App() {
     <a className="skip-link" href="#workspace-main">{view === 'home' ? t.home : t.inputLabel}</a>
     <div className="top"><Header theme={appearance.theme} onTheme={appearance.setTheme} onSettings={() => { setSidebarOpen(false); setSettingsOpen(true) }} onHome={goHome} disabled={locked} view={view}
       onStart={() => { if (activeId) { setView('chat'); setSidebarOpen(false) } else void startChat() }} onSection={goSection}
-      onToggleHistory={() => setSidebarOpen(open => !open)} historyOpen={sidebarOpen}
+      onToggleHistory={() => setSidebarOpen(open => !open)} historyOpen={sidebarOpen} onGames={() => openGames()} onKnowledge={openKnowledge}
       onDeleteData={() => setConfirmDelete(true)} /></div>
     {sidebarOpen && <button className="sidebar-backdrop" aria-label={t.closeHistory} onClick={() => setSidebarOpen(false)} />}
-    <aside className="chat-sidebar" id="chat-sidebar" aria-label={t.chatHistory} hidden={view === 'home' && !sidebarOpen}>
+    <aside className="chat-sidebar" id="chat-sidebar" aria-label={t.chatHistory} hidden={view !== 'chat' && !sidebarOpen}>
       <p className="sidebar-caption">{t.portal.sidebarCaption}</p>
       <button className="btn btn--primary sidebar-new" disabled={locked} onClick={() => void startChat()}><PlusIcon />{t.newChat}</button>
       <button className="sidebar-home" disabled={locked} onClick={goHome}><HomeIcon />{t.portal.returnToPortal}</button>
@@ -252,7 +261,9 @@ export default function App() {
       {!online && <div className="banner banner--offline" role="status">{t.offline}</div>}
       {actionFailed && <div className="banner banner--error" role="alert">{t.actionFailed}<button className="btn btn--ghost" onClick={() => void refreshList()}>{t.reload}</button></div>}
       {boot.phase === 'error' && <div className="answer answer--error" role="alert"><h2>{t.configLoadError}</h2><p>{t.errors[boot.code]}</p><button className="btn btn--secondary" onClick={() => { setBoot({ phase: 'loading' }); setLoadAttempt(n => n + 1) }}>{t.reload}</button></div>}
-      {view === 'home' && <div className="home-scroll"><Welcome youth={appearance.mode === 'youth'} character={appearance.character} onProfile={setProfile} onWork={() => appearance.setMode('work')} disabled={locked} maxChars={maxChars} onStart={() => void startChat()} onPickExample={text => void startChat(text)} onPickTopic={text => void startChat(text, true)} /></div>}
+      {view === 'home' && <div className="home-scroll"><Welcome youth={appearance.mode === 'youth'} character={appearance.character} onProfile={setProfile} onWork={() => appearance.setMode('work')} disabled={locked} maxChars={maxChars} onStart={() => void startChat()} onPickExample={text => void startChat(text)} onPickTopic={text => void startChat(text, true)} onGames={openGames} onKnowledge={openKnowledge} /></div>}
+      {view === 'knowledge' && <KnowledgeBase onHome={goHome} />}
+      {view === 'games' && <GamesHub key={games.key} entry={games.entry} initialCode={games.code} onHome={goHome} />}
       {view === 'chat' && <>
         <div className="chat-heading"><div><h1>{activeChat?.title || t.consultant}</h1><p>{t.portal.chatSubtitle}</p></div><button className="btn btn--secondary voice-launch" disabled={locked || !online} onClick={() => { voice.controller.end(); setVoiceOpen(true) }}><PhoneIcon />{t.voice.title}</button></div>
         {appearance.mode === 'youth' && <CharacterCompanion id={appearance.character} onProfile={setProfile} onSettings={() => setSettingsOpen(true)} />}

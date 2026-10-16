@@ -242,3 +242,35 @@ export async function uploadChatFile(file: File): Promise<ChatAttachment> {
   if (!attachment) throw new ApiError('FILE_UNREADABLE')
   return attachment
 }
+
+export interface KnowledgeDocument { id: string; kind: 'adilet' | 'akorda' | 'uploaded'; title: string; language: string; url: string; status: 'indexed' | 'downloaded' | 'source'; verified_at?: string }
+export interface KnowledgeBase {
+  mode: 'deepseek' | 'verified'
+  web_search: boolean
+  models: string[]
+  sites: { host: string; title: string; url: string }[]
+  topics: { id: string; title: string; urls: string[] }[]
+  documents: KnowledgeDocument[]
+}
+
+const text = (value: unknown) => typeof value === 'string' ? value.slice(0, MAX_TITLE_CHARS) : ''
+
+/** Публичный список источников, на которые опирается ассистент. Ссылки без http(s) отбрасываются. */
+export async function getKnowledge(): Promise<KnowledgeBase> {
+  const raw = await request('GET', '/api/knowledge') as Partial<Record<keyof KnowledgeBase, unknown>>
+  const list = (value: unknown) => Array.isArray(value) ? value as Record<string, unknown>[] : []
+  return {
+    mode: raw.mode === 'verified' ? 'verified' : 'deepseek',
+    web_search: raw.web_search === true,
+    models: list(raw.models).map(text).filter(Boolean),
+    sites: list(raw.sites).flatMap(site => { const url = safeHttpUrl(site.url); return url ? [{ host: text(site.host), title: text(site.title), url }] : [] }),
+    topics: list(raw.topics).map(topic => ({ id: text(topic.id), title: text(topic.title), urls: list(topic.urls).map(safeHttpUrl).filter((url): url is string => !!url) })),
+    documents: list(raw.documents).flatMap(doc => {
+      const url = safeHttpUrl(doc.url)
+      if (!url) return []
+      const kind = doc.kind === 'adilet' || doc.kind === 'akorda' ? doc.kind : 'uploaded'
+      const status = doc.status === 'indexed' || doc.status === 'downloaded' ? doc.status : 'source'
+      return [{ id: text(doc.id), kind, title: text(doc.title), language: text(doc.language), url, status, verified_at: typeof doc.verified_at === 'string' ? doc.verified_at : undefined }]
+    }),
+  }
+}

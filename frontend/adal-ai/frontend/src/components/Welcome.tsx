@@ -1,6 +1,8 @@
 import { PhotoCarousel } from './PhotoCarousel'
 import { Wordmark } from './Wordmark'
 import { CharacterRoster } from './Characters'
+import { GamesPromo, type GameEntry } from '../games/GamesHub'
+import { knowledgeCopy } from '../knowledge/copy'
 import type { CharacterId } from '../experience/content'
 import { useState } from 'react'
 import { useI18n } from '../i18n/context'
@@ -20,7 +22,7 @@ export function Examples({ onPick, disabled = false }: { onPick: (text: string) 
   </div>
 }
 
-export function Welcome({ onStart, onPickExample, onPickTopic, disabled, maxChars, youth = false, character = 'alexey', onProfile, onWork }: { youth?: boolean; character?: CharacterId; onProfile: (id: CharacterId) => void; onWork: () => void; onStart: () => void; onPickExample: (text: string) => void; onPickTopic: (text: string) => void; disabled: boolean; maxChars: number }) {
+export function Welcome({ onStart, onPickExample, onPickTopic, disabled, maxChars, youth = false, character = 'alexey', onProfile, onWork, onGames, onKnowledge }: { onGames: (entry?: GameEntry) => void; onKnowledge: () => void; youth?: boolean; character?: CharacterId; onProfile: (id: CharacterId) => void; onWork: () => void; onStart: () => void; onPickExample: (text: string) => void; onPickTopic: (text: string) => void; disabled: boolean; maxChars: number }) {
   const { t, lang } = useI18n()
   const [question, setQuestion] = useState('')
   const [category, setCategory] = useState<'topics' | 'documents'>('topics')
@@ -47,6 +49,7 @@ export function Welcome({ onStart, onPickExample, onPickTopic, disabled, maxChar
       </form>
       <div className="portal-ask__meta"><span>{t.portal.bilingual}</span><span><MicIcon />{t.portal.voiceAvailable}</span></div>
     </section>
+    <GamesPromo onOpen={onGames} />
     {youth && <CharacterRoster selected={character} onProfile={onProfile} onWork={onWork} />}
     <section id="topics" className="portal-section" aria-labelledby="topics-title" tabIndex={-1}>
       <div className="section-heading"><div><h2 id="topics-title">{t.portal.topicsTitle}</h2></div>
@@ -65,7 +68,7 @@ export function Welcome({ onStart, onPickExample, onPickTopic, disabled, maxChar
       })}</div>
     </section>
     <section id="resources" className="portal-section resources-section" aria-labelledby="resources-title" tabIndex={-1}>
-      <div className="section-heading"><div><h2 id="resources-title">{t.portal.resources}</h2></div><p className="section-heading__note">{t.portal.resourceHint}</p></div>
+      <div className="section-heading"><div><h2 id="resources-title">{t.portal.resources}</h2></div><div><p className="section-heading__note">{t.portal.resourceHint}</p><button className="text-button" disabled={disabled} onClick={onKnowledge}>{knowledgeCopy[lang].nav} →</button></div></div>
       <div className="resource-grid">{resources.map(resource => <a href={resource.url} key={resource.name} target="_blank" rel="noopener noreferrer" className="resource-link">
         <div><strong>{resource.name}</strong><p>{resource.text}</p><span>{new URL(resource.url).hostname}</span></div><ExternalIcon />
       </a>)}</div>

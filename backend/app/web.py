@@ -15,7 +15,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 
-from app import browser_auth, speech
+from app import browser_auth, knowledge, speech
 from app.chat_files import (
     EXTENSIONS,
     MAX_FILE_BYTES,
@@ -318,6 +318,12 @@ def install_web(app, authenticate, run_ask):
             "chat_mode": request.app.state.settings.web_chat_mode,
             "speech_languages": speech.languages(request.app.state.settings),
         }
+
+    @router.get("/knowledge")
+    async def knowledge_base(request: Request):
+        state = request.app.state
+        records = await asyncio.to_thread(state.library.list)
+        return knowledge.overview(state.settings, records, state.service.retriever.chunks)
 
     @router.post("/speech")
     async def speak(body: speech.SpeechRequest, request: Request, response: Response):
