@@ -1,13 +1,13 @@
 import { useEffect, useRef } from 'react'
 import { useI18n } from '../i18n/context'
-import type { VoiceController, VoiceState } from '../voice/VoiceController'
+import type { VoiceController, VoiceState, VoiceReply } from '../voice/VoiceController'
 import { MicIcon, PhoneIcon } from './Icons'
 
 interface Props {
   controller: VoiceController
   state: VoiceState
   onClose: () => void
-  onQuestion: (question: string) => Promise<string | undefined>
+  onQuestion: (question: string) => Promise<VoiceReply | undefined>
   busy: boolean
 }
 
@@ -31,6 +31,7 @@ export function VoiceCall({ controller, state, onClose, onQuestion, busy }: Prop
       <p className="voice-call__hint">{state.active ? t.voice.turnHint : t.voice.intro}</p>
       {state.transcript && <div className="voice-transcript"><span>{t.you}</span><p>{state.transcript}</p></div>}
       {error && <p className="voice-error" role="alert">{t.voice.errors[error]}</p>}
+      {state.usingFallback && !error && <p role="status">{t.voice.fallback}</p>}
       <div className="voice-call__actions">
         {!state.active ? <button className="btn btn--primary" disabled={busy || !!controller.unavailable} onClick={() => controller.start(onQuestion)}><PhoneIcon />{t.voice.start}</button> : <>
           <button className="btn btn--secondary" onClick={controller.toggleMute} aria-pressed={state.muted}><MicIcon />{state.muted ? t.voice.unmute : t.voice.mute}</button>

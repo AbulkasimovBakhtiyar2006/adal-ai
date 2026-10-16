@@ -88,3 +88,5 @@ export const SettingsIcon = () => <Icon><path d="M4 6h16M4 12h16M4 18h16" /><rec
 
 export const SunIcon = () => <Icon><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5 19 19M5 19l1.5-1.5M17.5 6.5 19 5" /></Icon>
 export const MoonIcon = () => <Icon><path d="M20.9 13a9 9 0 0 1-9.9-9.9A9 9 0 1 0 20.9 13Z" /></Icon>
+
+export const PaperclipIcon = () => <Icon><path d="m21 11-8.5 8.5a6 6 0 0 1-8.5-8.5l9-9a4 4 0 0 1 5.7 5.7l-9 9a2 2 0 0 1-2.8-2.8L15 6" /></Icon>

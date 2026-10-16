@@ -23,6 +23,9 @@ export function TurnView({ turn, canRetry, onRetry, canSpeak, speaking, onSpeak 
       <div className="bubble bubble--user">
         <span className="visually-hidden">{t.you}: </span>
         {turn.question}
+        {!!turn.attachments?.length && <ul className="message-files" aria-label={t.files.attached}>
+          {turn.attachments.map((file, index) => <li key={index}>📎 {file.name}</li>)}
+        </ul>}
       </div>
       {turn.phase === 'pending' && (
         <div className="answer answer--pending" role="status">

@@ -10,15 +10,25 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 
-from app import browser_auth
+from app import browser_auth, speech
+from app.chat_files import (
+    EXTENSIONS,
+    MAX_FILE_BYTES,
+    MAX_FILE_TEXT,
+    MAX_FILES,
+    ChatAttachment,
+    file_name,
+)
 from app.chat_language import reply_language
 from app.direct_chat import answer as direct_answer
+from app.games import install_games
 from app.models import AskRequest
+from app.parsing import ParseError, parse_file
 from app.providers import InvalidModelOutput, ProviderUnavailable
 
 COOKIE = "adal_session"
@@ -36,6 +46,7 @@ class PortalFiles(StaticFiles):
 
 class GuestContextTurn(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
+    attachments: list[ChatAttachment] = Field(default_factory=list, max_length=MAX_FILES)
     question: str = Field(max_length=2000)
     answer: str = Field(max_length=20000)
 
@@ -47,6 +58,7 @@ class GoogleLogin(BaseModel):
 
 class ChatRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
+    attachments: list[ChatAttachment] = Field(default_factory=list, max_length=MAX_FILES)
     local_only: bool = False
     context: list[GuestContextTurn] = Field(default_factory=list, max_length=20)
     message: str = Field(max_length=2000)
@@ -229,7 +241,8 @@ def install_web(app, authenticate, run_ask):
 
     async def current_account(request):
         return await asyncio.to_thread(
-            browser_auth.account, request.app.state.history,
+            browser_auth.account,
+            request.app.state.history,
             request.cookies.get(browser_auth.AUTH_COOKIE),
         )
 
@@ -254,14 +267,22 @@ def install_web(app, authenticate, run_ask):
                 browser_auth.verify_credential, body.credential, client_id
             )
             token = await asyncio.to_thread(
-                browser_auth.login, request.app.state.history, key, claims,
+                browser_auth.login,
+                request.app.state.history,
+                key,
+                claims,
                 request.cookies.get(browser_auth.AUTH_COOKIE),
             )
         except ValueError:
             raise HTTPException(401, "invalid_google_login") from None
         response.set_cookie(
-            browser_auth.AUTH_COOKIE, token, httponly=True, samesite="strict",
-            secure=request.url.scheme == "https", max_age=browser_auth.AUTH_TTL, path="/api",
+            browser_auth.AUTH_COOKIE,
+            token,
+            httponly=True,
+            samesite="strict",
+            secure=request.url.scheme == "https",
+            max_age=browser_auth.AUTH_TTL,
+            path="/api",
         )
         return {"ok": True}
 
@@ -271,7 +292,8 @@ def install_web(app, authenticate, run_ask):
         if user and user["id"] in request.app.state.busy_sessions:
             return error("CONVERSATION_BUSY", 409)
         await asyncio.to_thread(
-            browser_auth.logout, request.app.state.history,
+            browser_auth.logout,
+            request.app.state.history,
             request.cookies.get(browser_auth.AUTH_COOKIE),
         )
         response.delete_cookie(browser_auth.AUTH_COOKIE, path="/api")
@@ -294,7 +316,28 @@ def install_web(app, authenticate, run_ask):
             "guest_local": True,
             "max_message_chars": 2000,
             "chat_mode": request.app.state.settings.web_chat_mode,
+            "speech_languages": speech.languages(request.app.state.settings),
         }
+
+    @router.post("/speech")
+    async def speak(body: speech.SpeechRequest, request: Request, response: Response):
+        await session(request, response)
+        state = request.app.state
+        if body.lang not in speech.languages(state.settings):
+            return error("AI_NOT_CONFIGURED")
+        if not state.speech_limits.admit():
+            return error("RATE_LIMITED", 429)
+        try:
+            async with state.speech_limits.slots:
+                audio = await speech.synthesize(body, state.settings, state.http)
+        except ProviderUnavailable:
+            return error("AI_FAILED")
+        response.body = audio
+        response.status_code = 200
+        response.headers["Content-Type"] = "audio/mpeg"
+        response.headers["Content-Length"] = str(len(audio))
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        return response
 
     @router.get("/history")
     async def history(request: Request, response: Response, conversation_id: str | None = None):
@@ -338,9 +381,47 @@ def install_web(app, authenticate, run_ask):
             return error("CONVERSATION_BUSY", 409)
         return await asyncio.to_thread(request.app.state.history.create_conversation, key)
 
+    @router.post("/chat/files")
+    async def upload_chat_file(request: Request, response: Response):
+        await session(request, response)
+        state = request.app.state
+        if state.upload_slots.locked():
+            return error("RATE_LIMITED", 429)
+        async with state.upload_slots:
+            # Stream with a hard cap before multipart parsing, including chunked requests.
+            payload = bytearray()
+            async for chunk in request.stream():
+                payload.extend(chunk)
+                if len(payload) > MAX_FILE_BYTES + 65536:
+                    return error("FILE_TOO_LARGE", 413)
+            request._body = bytes(payload)
+            async with request.form(max_files=1, max_fields=0) as form:
+                file = form.get("file")
+                if not isinstance(file, UploadFile) and not hasattr(file, "filename"):
+                    return error("FILE_UNREADABLE", 422)
+                name = file_name(file.filename or "")
+                if Path(name).suffix.lower() not in EXTENSIONS:
+                    return error("FILE_UNSUPPORTED", 422)
+                data = await file.read(MAX_FILE_BYTES + 1)
+                if len(data) > MAX_FILE_BYTES:
+                    return error("FILE_TOO_LARGE", 413)
+                try:
+                    parsed = await asyncio.to_thread(parse_file, data, name)
+                except ParseError:
+                    return error("FILE_UNREADABLE", 422)
+                if len(parsed.text) > MAX_FILE_TEXT:
+                    return error("FILE_TOO_LONG", 422)
+                return {"name": name, "size": len(data), "text": parsed.text}
+
     @router.post("/chat")
     async def chat(body: ChatRequest, request: Request, response: Response):
         body.message = body.message.strip()
+        if not body.message and body.attachments:
+            body.message = (
+                "Кратко изложи содержание приложенных документов."
+                if body.lang == "ru"
+                else "Тіркелген құжаттардың мазмұнын қысқаша баянда."
+            )
         if len(body.message) < 3:
             return error("MESSAGE_EMPTY", 422)
         key = await session(request, response)
@@ -353,21 +434,32 @@ def install_web(app, authenticate, run_ask):
                 await asyncio.to_thread(
                     state.history.require_conversation, key, body.conversation_id
                 )
-            previous = None if body.local_only else await asyncio.to_thread(
-                state.history.previous, key, body.client_id
+            previous = (
+                None
+                if body.local_only
+                else await asyncio.to_thread(state.history.previous, key, body.client_id)
             )
             if previous:
                 if previous[:2] != (body.message, body.lang) or previous[3] != (
                     body.conversation_id or "default"
                 ):
                     return error("AI_BAD_RESPONSE", 409)
-                return json.loads(previous[2])
-            history = ([turn.model_dump() for turn in body.context] if body.local_only
-                       else await asyncio.to_thread(
-                           state.history.history, key, body.conversation_id or "default"
-                       ))
+                saved = json.loads(previous[2])
+                if saved.get("attachments", []) != [item.model_dump() for item in body.attachments]:
+                    return error("AI_BAD_RESPONSE", 409)
+                return saved
+            history = (
+                [turn.model_dump() for turn in body.context]
+                if body.local_only
+                else await asyncio.to_thread(
+                    state.history.history, key, body.conversation_id or "default"
+                )
+            )
             answer_lang = reply_language(body.message, body.lang, history)
-            if state.settings.web_chat_mode == "deepseek":
+            has_documents = bool(
+                body.attachments or any(t.get("attachments") for t in history[-6:])
+            )
+            if state.settings.web_chat_mode == "deepseek" or has_documents:
                 if (
                     not state.settings.deepseek_api_key or not state.settings.deepseek_model
                 ) and not (state.settings.web_search_enabled and state.settings.gemini_api_key):
@@ -383,6 +475,11 @@ def install_web(app, authenticate, run_ask):
                             answer_lang,
                             history,
                             body.response_mode,
+                            **(
+                                {"attachments": [item.model_dump() for item in body.attachments]}
+                                if has_documents
+                                else {}
+                            ),
                         )
                 except TimeoutError:
                     return error("AI_TIMEOUT")
@@ -391,6 +488,8 @@ def install_web(app, authenticate, run_ask):
                 except ProviderUnavailable:
                     return error("AI_FAILED")
                 reply["response_language"] = answer_lang
+                if body.attachments:
+                    reply["attachments"] = [item.model_dump() for item in body.attachments]
                 if reply.get("search_suggestions_html") and not body.local_only:
                     reply["search_suggestions_url"] = f"/api/search-suggestions/{body.client_id}"
                 if not body.local_only:
@@ -465,6 +564,7 @@ def install_web(app, authenticate, run_ask):
     async def delete_session(request: Request, response: Response):
         return await remove(request, response, True)
 
+    install_games(router)
     app.include_router(router)
 
     if DIST.is_dir():

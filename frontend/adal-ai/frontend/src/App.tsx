@@ -1,3 +1,4 @@
+import type { ChatAttachment } from './api/types'
 import { accountCopy } from './account/copy'
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { ApiError, createConversation, deleteSession, getConfig, getConversations, getHistory, signInWithGoogle, signOut } from './api/client'
@@ -52,7 +53,7 @@ export default function App() {
   const [loadAttempt, setLoadAttempt] = useState(0)
   const [voiceOpen, setVoiceOpen] = useState(false)
   const chat = useChat(lang, activeId)
-  const voice = useVoice(lang, boot.phase === 'ready' ? boot.config.maxMessageChars : 2000, `${view}:${activeId ?? ''}`)
+  const voice = useVoice(lang, boot.phase === 'ready' ? boot.config.maxMessageChars : 2000, `${view}:${activeId ?? ''}`, boot.phase === 'ready' && !!boot.config.speechLanguages?.length)
   const { loadHistory, clear } = chat
   const online = useSyncExternalStore(subscribeOnline, () => navigator.onLine)
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -163,12 +164,12 @@ export default function App() {
     } catch { setActionFailed(true) }
     finally { setSwitching(false); operationRef.current = false }
   }
-  const submit = () => {
-    const question = draft.trim()
+  const submit = (attachments: ChatAttachment[] = []) => {
+    const question = draft.trim() || (attachments.length ? t.files.defaultQuestion : '')
     if (!question || locked || !activeId) return
     setDraft('')
     draftsRef.current[activeId] = ''
-    void chat.send(question).then(refreshList)
+    void chat.send(question, 'text', activeId, attachments).then(refreshList)
   }
   const pickExample = (text: string) => { setDraft(text); inputRef.current?.focus() }
   const cancelDelete = useCallback(() => setConfirmDelete(false), [])
@@ -260,11 +261,11 @@ export default function App() {
             {chat.turns.length === 0 ? <section className="empty-chat"><h2>{t.emptyChatTitle}</h2>{!switching && <Examples onPick={pickExample} disabled={locked} />}</section> :
               <ol className="turns" aria-live="polite">{chat.turns.map(turn => <TurnView key={turn.id} turn={turn} canRetry={turn.id === lastTurn?.id && !locked}
                 canSpeak={voice.controller.canSpeak} speaking={voice.state.speakingId === turn.id}
-                onSpeak={() => { if (turn.reply) voice.controller.read(turn.id, turn.reply.answer) }}
+                onSpeak={() => { if (turn.reply) voice.controller.read(turn.id, turn.reply.answer, turn.reply.responseLanguage) }}
                 onRetry={id => { void chat.retry(id)?.then(refreshList) }} />)}</ol>}
           </div>
         </div>
-        <footer className="composer-area"><Composer value={draft} onChange={setDraft} onSubmit={submit} busy={chat.busy || switching || !ready || !activeId} disabled={switching && !!activeId}
+        <footer className="composer-area"><Composer key={activeId} value={draft} onChange={setDraft} onSubmit={submit} busy={chat.busy || switching || !ready || !activeId} disabled={switching && !!activeId}
           maxChars={maxChars} inputRef={inputRef} />
           {!voiceOpen && voice.state.error && <p className="voice-error" role="alert">{t.voice.errors[voice.state.error]}</p>}
           <p className="composer-footnote">{t.portal.chatFootnote}</p>
@@ -272,14 +273,14 @@ export default function App() {
       </>}
     </main>
     {settingsOpen && <AppearanceSettings config={boot.phase === 'ready' ? boot.config : undefined} disabled={locked} onAuth={changeAccount} theme={appearance.theme} onTheme={appearance.setTheme} mode={appearance.mode} character={appearance.character} onMode={appearance.setMode} onCharacter={appearance.setCharacter} onClose={() => setSettingsOpen(false)} />}
-    {profile && appearance.mode === 'youth' && <CharacterProfile id={profile} selected={appearance.character} onSelect={appearance.setCharacter} disabled={locked} onQuestion={text => { if (view === 'chat') pickExample(text); else void startChat(text) }} onClose={() => setProfile(null)} />}
+    {profile && appearance.mode === 'youth' && <CharacterProfile key={profile} id={profile} selected={appearance.character} onSelect={appearance.setCharacter} disabled={locked} onQuestion={text => { if (view === 'chat') pickExample(text); else void startChat(text) }} onClose={() => setProfile(null)} />}
     {confirmDelete && <ConfirmDialog title={t.deleteDataConfirmTitle} text={t.deleteDataConfirmText} confirmLabel={t.deleteDataConfirm} onConfirm={() => void removeData()} onCancel={cancelDelete} />}
     {voiceOpen && <VoiceCall controller={voice.controller} state={voice.state} busy={locked || !online}
       onClose={() => { voice.controller.end(); setVoiceOpen(false) }}
       onQuestion={async question => {
         const reply = await chat.send(question, 'voice')
         void refreshList()
-        return reply?.answer
+        return reply
       }} />}
   </div>
 }

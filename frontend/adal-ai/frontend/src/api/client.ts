@@ -10,6 +10,7 @@ import {
   type AiMode,
   type AnswerStatus,
   type ChatReply,
+  type ChatAttachment,
   type Conversation,
   type ErrorCode,
   type HistoryTurn,
@@ -51,8 +52,8 @@ async function request(method: string, path: string, body?: unknown, timeoutMs =
     response = await fetch(path, {
       method,
       credentials: 'same-origin',
-      headers: { ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...(accountId && path !== '/api/config' ? { 'X-Adal-Account': accountId } : {}) },
-      body: body === undefined ? undefined : JSON.stringify(body),
+      headers: { ...(body === undefined || body instanceof FormData ? {} : { 'Content-Type': 'application/json' }), ...(accountId && path !== '/api/config' ? { 'X-Adal-Account': accountId } : {}) },
+      body: body === undefined ? undefined : body instanceof FormData ? body : JSON.stringify(body),
       signal: controller.signal,
     })
   } catch {
@@ -116,6 +117,8 @@ export function normalizeReply(value: unknown): ChatReply {
       /^\/api\/search-suggestions\/[a-zA-Z0-9_-]{1,100}$/.test(raw.search_suggestions_url)
       ? { searchSuggestionsUrl: raw.search_suggestions_url } : {}),
     answer: raw.answer,
+    ...(raw.response_language === 'kk' || raw.response_language === 'ru'
+      ? { responseLanguage: raw.response_language } : {}),
     sources: normalizeSources(raw.sources),
     status: STATUSES.includes(raw.status as AnswerStatus) ? (raw.status as AnswerStatus) : null,
     aiMode: raw.ai_mode === 'mock' || raw.ai_mode === 'real' ? (raw.ai_mode as AiMode) : null,
@@ -132,11 +135,25 @@ export async function getConfig(): Promise<PublicConfig> {
   accountId = user ? String(user.id) : undefined
   localGuest = raw.guest_local === true && !user
   return { aiMode, maxMessageChars: max,
+    speechLanguages: Array.isArray(raw.speech_languages) ? raw.speech_languages.filter((lang): lang is Lang => lang === 'ru' || lang === 'kk') : [],
     user: user ? { id: String(user.id), name: String(user.name), email: String(user.email) } : null,
     guestLocal: raw.guest_local === true,
     googleClientId: typeof raw.google_client_id === 'string' ? raw.google_client_id : null,
     googleNonce: typeof raw.google_nonce === 'string' ? raw.google_nonce : null,
   }
+}
+
+export async function synthesizeSpeech(text: string, lang: Lang, signal: AbortSignal): Promise<Blob> {
+  const response = await fetch('/api/speech', {
+    method: 'POST', credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', ...(accountId ? { 'X-Adal-Account': accountId } : {}) },
+    body: JSON.stringify({ text, lang }),
+    signal: AbortSignal.any([signal, AbortSignal.timeout(25_000)]),
+  })
+  if (!response.ok || !response.headers.get('content-type')?.startsWith('audio/')) throw new Error('speech_failed')
+  const audio = await response.blob()
+  if (!audio.size) throw new Error('empty_speech')
+  return audio
 }
 
 export async function getHistory(conversationId?: string): Promise<HistoryTurn[]> {
@@ -149,7 +166,7 @@ export async function getHistory(conversationId?: string): Promise<HistoryTurn[]
     const turn = (item ?? {}) as Record<string, unknown>
     if (typeof turn.id !== 'string' || typeof turn.question !== 'string') continue
     try {
-      turns.push({ id: turn.id, question: turn.question, reply: normalizeReply(turn) })
+      turns.push({ id: turn.id, question: turn.question, attachments: normalizeAttachments(turn.attachments), reply: normalizeReply(turn) })
     } catch {
       // повреждённую запись истории пропускаем, остальные показываем
     }
@@ -158,16 +175,16 @@ export async function getHistory(conversationId?: string): Promise<HistoryTurn[]
 }
 
 /** clientId делает отправку идемпотентной: повтор не создаёт второй вопрос на сервере. */
-export async function sendMessage(message: string, lang: Lang, clientId: string, conversationId?: string, responseMode: ResponseMode = 'text'): Promise<ChatReply> {
+export async function sendMessage(message: string, lang: Lang, clientId: string, conversationId?: string, responseMode: ResponseMode = 'text', attachments: ChatAttachment[] = []): Promise<ChatReply> {
   const guest = localGuest
   const previous = guest ? local(() => localHistory.history(conversationId)) : []
   const existing = previous.find(turn => turn.id === clientId)
   if (existing) return existing.reply
-  const raw = await request('POST', '/api/chat', { message, lang, client_id: clientId, conversation_id: conversationId, response_mode: responseMode,
-    ...(guest ? { local_only: true, context: previous.slice(-20).map(turn => ({ question: turn.question, answer: turn.reply.answer.slice(0, 20000) })) } : {}),
+  const raw = await request('POST', '/api/chat', { message, lang, client_id: clientId, conversation_id: conversationId, response_mode: responseMode, ...(attachments.length ? { attachments } : {}),
+    ...(guest ? { local_only: true, context: previous.slice(-20).map(turn => ({ question: turn.question, answer: turn.reply.answer.slice(0, 20000), ...(turn.attachments?.length ? { attachments: turn.attachments } : {}) })) } : {}),
   }, CHAT_TIMEOUT_MS)
   const reply = normalizeReply(raw)
-  if (guest && conversationId) local(() => localHistory.save(conversationId, { id: clientId, question: message, reply }))
+  if (guest && conversationId) local(() => localHistory.save(conversationId, { id: clientId, question: message, attachments, reply }))
   return reply
 }
 
@@ -210,4 +227,18 @@ export async function signInWithGoogle(credential: string): Promise<void> {
 }
 export async function signOut(): Promise<void> {
   await request('POST', '/api/auth/logout', {})
+}
+
+function normalizeAttachments(value: unknown): ChatAttachment[] {
+  if (!Array.isArray(value)) return []
+  return value.filter((item): item is ChatAttachment => !!item && typeof item.name === 'string' && typeof item.text === 'string' && typeof item.size === 'number').slice(0, 3)
+}
+
+export async function uploadChatFile(file: File): Promise<ChatAttachment> {
+  const form = new FormData()
+  form.append('file', file)
+  const raw = await request('POST', '/api/chat/files', form, CHAT_TIMEOUT_MS)
+  const attachment = normalizeAttachments([raw])[0]
+  if (!attachment) throw new ApiError('FILE_UNREADABLE')
+  return attachment
 }

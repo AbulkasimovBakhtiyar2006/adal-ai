@@ -188,10 +188,10 @@ async function handleChat(req: IncomingMessage, res: ServerResponse, session: Se
   const clientId = typeof body.client_id === 'string' && body.client_id.length <= 64 ? body.client_id : null
   const conversationId = typeof body.conversation_id === 'string' ? body.conversation_id : 'default'
   let conversation = session.conversations.find(item => item.id === conversationId)
-  if (!conversation && conversationId !== 'default') throw new MockError(404, 'INTERNAL')
+  if (!conversation && conversationId !== 'default' && !body.local_only) throw new MockError(404, 'INTERNAL')
   if (!conversation) {
     conversation = { id: conversationId, title: '', updated_at: Date.now() / 1000 }
-    session.conversations.push(conversation)
+    if (!body.local_only) session.conversations.push(conversation)
   }
 
   if (!message) throw new MockError(422, 'MESSAGE_EMPTY')
@@ -220,7 +220,7 @@ async function handleChat(req: IncomingMessage, res: ServerResponse, session: Se
     }
     const reply = buildReply(message, lang)
     // Как и настоящий backend: пара «вопрос — ответ» сохраняется только при успехе.
-    session.turns.push({ id: clientId ?? randomBytes(8).toString('hex'), question: message, reply, conversationId })
+    if (!body.local_only) session.turns.push({ id: clientId ?? randomBytes(8).toString('hex'), question: message, reply, conversationId })
     conversation.title ||= message.slice(0, 100)
     conversation.updated_at = Date.now() / 1000
     sendJson(res, 200, reply)
@@ -248,7 +248,7 @@ export function mockApiMiddleware() {
           return sendJson(res, 200, item)
         }
         case 'GET /api/config':
-          return sendJson(res, 200, { ai_mode: 'mock', max_message_chars: MAX_MESSAGE_CHARS })
+          return sendJson(res, 200, { ai_mode: 'mock', max_message_chars: MAX_MESSAGE_CHARS, guest_local: true, user: null, google_client_id: null })
         case 'GET /api/history':
           return sendJson(res, 200, {
             turns: session.turns.filter(turn => turn.conversationId === (new URL(req.url ?? '/', 'http://localhost').searchParams.get('conversation_id') ?? 'default'))

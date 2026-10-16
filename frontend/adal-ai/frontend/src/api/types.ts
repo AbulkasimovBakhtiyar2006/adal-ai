@@ -14,6 +14,7 @@ export interface Source {
 }
 
 export interface ChatReply {
+  responseLanguage?: Lang
   searchSuggestionsUrl?: string
   answer: string
   sources: Source[]
@@ -22,7 +23,14 @@ export interface ChatReply {
   aiMode: AiMode | null
 }
 
+export interface ChatAttachment {
+  name: string
+  size: number
+  text: string
+}
+
 export interface HistoryTurn {
+  attachments?: ChatAttachment[]
   id: string
   question: string
   reply: ChatReply
@@ -37,6 +45,7 @@ export interface Conversation {
 export interface AccountUser { id: string; name: string; email: string }
 
 export interface PublicConfig {
+  speechLanguages?: Lang[]
   user?: AccountUser | null
   googleClientId?: string | null
   googleNonce?: string | null
@@ -46,6 +55,10 @@ export interface PublicConfig {
 }
 
 export const ERROR_CODES = [
+  'FILE_UNSUPPORTED',
+  'FILE_TOO_LARGE',
+  'FILE_TOO_LONG',
+  'FILE_UNREADABLE',
   'MESSAGE_EMPTY',
   'MESSAGE_TOO_LONG',
   'RATE_LIMITED',

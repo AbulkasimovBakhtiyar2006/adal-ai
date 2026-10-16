@@ -42,7 +42,8 @@ def account(store, token):
         db.execute("DELETE FROM account_tokens WHERE expires < ?", (time.time(),))
         row = db.execute(
             "SELECT a.id, a.name, a.email FROM accounts a JOIN account_tokens t "
-            "ON a.id=t.account WHERE t.token=?", (digest(token),)
+            "ON a.id=t.account WHERE t.token=?",
+            (digest(token),),
         ).fetchone()
     return dict(zip(("id", "name", "email"), row, strict=True)) if row else None
 
@@ -51,8 +52,9 @@ def challenge(store, session):
     nonce = secrets.token_urlsafe(32)
     with store.connect() as db:
         db.execute("DELETE FROM login_challenges WHERE expires < ?", (time.time(),))
-        db.execute("INSERT INTO login_challenges VALUES (?, ?, ?)",
-                   (nonce, session, time.time() + 600))
+        db.execute(
+            "INSERT INTO login_challenges VALUES (?, ?, ?)", (nonce, session, time.time() + 600)
+        )
     return nonce
 
 
@@ -68,9 +70,12 @@ def verify_credential(credential, client_id):
         claims = id_token.verify_oauth2_token(credential, fetch_keys, client_id)
     except (ValueError, GoogleAuthError) as exc:
         raise ValueError("invalid_google_credential") from exc
-    if (not isinstance(claims.get("sub"), str) or not claims["sub"]
-            or claims.get("email_verified") is not True
-            or not isinstance(claims.get("email"), str)):
+    if (
+        not isinstance(claims.get("sub"), str)
+        or not claims["sub"]
+        or claims.get("email_verified") is not True
+        or not isinstance(claims.get("email"), str)
+    ):
         raise ValueError("invalid_google_identity")
     return claims
 
@@ -87,13 +92,17 @@ def login(store, session, claims, old_token):
             raise ValueError("invalid_login_challenge")
         # Account data survives expiry of an individual browser's login session.
         db.execute("INSERT OR IGNORE INTO sessions VALUES (?, ?)", (key, 253402300799))
-        db.execute("INSERT INTO accounts VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE "
-                   "SET name=excluded.name, email=excluded.email",
-                   (key, str(claims.get("name") or claims["email"])[:200], claims["email"][:320]))
+        db.execute(
+            "INSERT INTO accounts VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE "
+            "SET name=excluded.name, email=excluded.email",
+            (key, str(claims.get("name") or claims["email"])[:200], claims["email"][:320]),
+        )
         if old_token:
             db.execute("DELETE FROM account_tokens WHERE token=?", (digest(old_token),))
-        db.execute("INSERT INTO account_tokens VALUES (?, ?, ?)",
-                   (digest(token), key, time.time() + AUTH_TTL))
+        db.execute(
+            "INSERT INTO account_tokens VALUES (?, ?, ?)",
+            (digest(token), key, time.time() + AUTH_TTL),
+        )
     return token
 
 

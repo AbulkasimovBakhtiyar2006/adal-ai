@@ -1,5 +1,8 @@
 import type { Lang } from '../api/types'
 import { selectVoice, speechChunks } from './speech'
+import type { CloudSpeech } from './cloudSpeech'
+
+export type VoiceReply = string | { answer: string; responseLanguage?: Lang }
 
 export interface Recognition {
   lang: string
@@ -23,8 +26,9 @@ export interface VoiceState {
   transcript: string
   error: VoiceError | null
   speakingId: string | null
+  usingFallback: boolean
 }
-const initial: VoiceState = { active: false, phase: 'idle', muted: false, transcript: '', error: null, speakingId: null }
+const initial: VoiceState = { active: false, phase: 'idle', muted: false, transcript: '', error: null, speakingId: null, usingFallback: false }
 
 /** Strip display markup without reading URLs or Markdown punctuation aloud. */
 export function speechText(text: string): string {
@@ -50,8 +54,9 @@ export class VoiceController {
   private timer: ReturnType<typeof setTimeout> | undefined
   private waitingTimer: ReturnType<typeof setTimeout> | undefined
   private cancelVoiceWait?: () => void
-  private ask?: (question: string) => Promise<string | undefined>
-  constructor(private lang: Lang, private maxChars: number) {}
+  private ask?: (question: string) => Promise<VoiceReply | undefined>
+  private cloudAbort?: AbortController
+  constructor(private lang: Lang, private maxChars: number, private cloudSpeech?: CloudSpeech) {}
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener) } }
   getSnapshot = () => this.state
   private update(next: Partial<VoiceState>) {
@@ -62,7 +67,8 @@ export class VoiceController {
     const browser = window as SpeechWindow
     return browser.SpeechRecognition ?? browser.webkitSpeechRecognition
   }
-  get canSpeak() { return 'speechSynthesis' in window && 'SpeechSynthesisUtterance' in window }
+  get canSpeak() { return !!this.cloudSpeech || this.canSpeakBrowser }
+  private get canSpeakBrowser() { return 'speechSynthesis' in window && 'SpeechSynthesisUtterance' in window }
   get unavailable(): VoiceError | null {
     if (!window.isSecureContext) return 'insecure'
     if (!this.recognizer || !this.canSpeak) return 'unsupported'
@@ -77,6 +83,8 @@ export class VoiceController {
     }
   }
   private stopSpeech() {
+    this.cloudAbort?.abort()
+    this.cloudAbort = undefined
     this.speechGeneration++
     clearTimeout(this.timer)
     this.cancelVoiceWait?.()
@@ -95,7 +103,7 @@ export class VoiceController {
     this.ask = undefined
     this.update({ ...initial })
   }
-  start = (ask: (question: string) => Promise<string | undefined>) => {
+  start = (ask: (question: string) => Promise<VoiceReply | undefined>) => {
     this.end()
     if (this.unavailable) { this.update({ error: this.unavailable }); return }
     this.ask = ask
@@ -148,16 +156,17 @@ export class VoiceController {
   private async deliver(question: string, generation: number) {
     this.update({ phase: 'thinking', transcript: question })
     let waitingSpeech = false
-    let readyAnswer: string | undefined
+    let readyAnswer: VoiceReply | undefined
     const playAnswer = () => {
       if (generation !== this.generation || !readyAnswer) return
-      this.speak(readyAnswer, null, () => {
+      const answer = typeof readyAnswer === 'string' ? { answer: readyAnswer } : readyAnswer
+      this.speak(answer.answer, null, () => {
         if (this.state.muted) this.update({ phase: 'paused' })
         else this.listen()
-      })
+      }, 'speaking', undefined, answer.responseLanguage ?? this.lang)
     }
     // A quick reply skips the acknowledgement. The request runs while it is spoken.
-    this.waitingTimer = setTimeout(() => {
+    if (!this.cloudSpeech) this.waitingTimer = setTimeout(() => {
       if (generation !== this.generation) return
       waitingSpeech = true
       const finished = () => {
@@ -200,25 +209,54 @@ export class VoiceController {
     this.update({ muted: false })
     this.listen()
   }
-  read = (id: string, text: string) => {
+  read = (id: string, text: string, lang: Lang = this.lang) => {
     const wasSpeaking = this.state.speakingId === id
     this.end()
-    if (!wasSpeaking) this.speak(text, id, () => this.update({ phase: 'idle', speakingId: null }))
+    if (!wasSpeaking) this.speak(text, id, () => this.update({ phase: 'idle', speakingId: null }), 'speaking', undefined, lang)
   }
   private speak(
     text: string, id: string | null, done: () => void,
     phase: VoiceState['phase'] = 'speaking', onFailure?: () => void,
+    lang: Lang = this.lang,
+  ) {
+    if (!this.cloudSpeech || onFailure) { this.speakBrowser(text, id, done, phase, onFailure, lang); return }
+    this.stopSpeech()
+    const chunks = speechChunks(speechText(text), 1200)
+    if (!chunks.length) { this.fail('playback'); return }
+    const abort = new AbortController()
+    this.cloudAbort = abort
+    this.update({ phase, speakingId: id, error: null, usingFallback: false })
+    const play = async () => {
+      for (let index = 0; index < chunks.length; index++) {
+        try { await this.cloudSpeech!(chunks[index], lang, abort.signal) }
+        catch {
+          if (abort.signal.aborted) return
+          this.update({ usingFallback: true })
+          this.speakBrowser(chunks.slice(index).join(''), id, done, phase, onFailure, lang)
+          return
+        }
+        if (abort.signal.aborted) return
+      }
+      this.cloudAbort = undefined
+      done()
+    }
+    void play()
+  }
+  private speakBrowser(
+    text: string, id: string | null, done: () => void,
+    phase: VoiceState['phase'] = 'speaking', onFailure?: () => void,
+    lang: Lang = this.lang,
   ) {
     const failed = (error: VoiceError) => {
       if (onFailure) { this.stopSpeech(); onFailure() }
       else this.fail(error)
     }
-    if (!this.canSpeak) { failed('unsupported'); return }
+    if (!this.canSpeakBrowser) { failed('unsupported'); return }
     this.stopSpeech()
     const clean = speechText(text)
     const chunks = speechChunks(clean)
     if (!chunks.length) { failed('playback'); return }
-    const language = this.lang === 'kk' ? 'kk-KZ' : 'ru-RU'
+    const language = lang === 'kk' ? 'kk-KZ' : 'ru-RU'
     const synthesis = window.speechSynthesis
     let voice: SpeechSynthesisVoice | undefined
     const generation = this.generation
@@ -246,7 +284,7 @@ export class VoiceController {
       this.cancelVoiceWait?.()
       this.cancelVoiceWait = undefined
       const voices = synthesis.getVoices()
-      voice = selectVoice(voices, this.lang)
+      voice = selectVoice(voices, lang)
       if (voices.length && !voice) { failed('language'); return }
       next()
     }

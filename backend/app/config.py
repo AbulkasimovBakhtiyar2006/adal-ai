@@ -18,6 +18,11 @@ class Settings(BaseSettings):
     deepseek_api_key: SecretStr = SecretStr("")
     deepseek_model: str = "deepseek-flash"
     audio_model: str = ""
+    elevenlabs_api_key: SecretStr = SecretStr("")
+    elevenlabs_model: Literal["eleven_v3", "eleven_v4"] = "eleven_v3"
+    elevenlabs_voice_id: str = Field(default="", pattern=r"^[a-zA-Z0-9_-]{0,100}$")
+    elevenlabs_voice_id_kk: str = Field(default="", pattern=r"^[a-zA-Z0-9_-]{0,100}$")
+    elevenlabs_voice_id_ru: str = Field(default="", pattern=r"^[a-zA-Z0-9_-]{0,100}$")
     admin_api_key: SecretStr = SecretStr("")
     runtime_dir: Path = ROOT / "data/runtime"
     library_dir: Path = ROOT / "data/library"

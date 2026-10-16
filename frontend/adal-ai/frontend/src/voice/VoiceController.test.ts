@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { VoiceController, speechText, type Recognition } from './VoiceController'
+import type { CloudSpeech } from './cloudSpeech'
 
 class FakeRecognition implements Recognition {
   static instances: FakeRecognition[] = []
@@ -46,6 +47,56 @@ beforeEach(() => {
 afterEach(() => { controller.end(); vi.unstubAllGlobals(); vi.useRealTimers() })
 
 describe('voice conversation', () => {
+  it('uses the server reply language for cloud speech and resumes listening', async () => {
+    const cloud = vi.fn(async () => {})
+    controller = new VoiceController('ru', 2000, cloud)
+    controller.start(async () => ({ answer: 'Сәлем! [1]', responseLanguage: 'kk' }))
+    mic().result('Қазақша жауап бер'); mic().onend?.()
+    await flush()
+    expect(cloud).toHaveBeenCalledWith('Сәлем!', 'kk', expect.any(AbortSignal))
+    expect(spoken).toHaveLength(0)
+    expect(controller.getSnapshot().phase).toBe('listening')
+  })
+  it('cancels cloud audio and ignores its late completion after hanging up', async () => {
+    let resolve!: () => void
+    const cloud = vi.fn<CloudSpeech>(() => new Promise<void>(done => { resolve = done }))
+    controller = new VoiceController('ru', 2000, cloud)
+    controller.start(async () => 'Ответ')
+    mic().result('Вопрос'); mic().onend?.(); await flush()
+    const signal = cloud.mock.calls[0][2] as AbortSignal
+    controller.end(); resolve(); await flush()
+    expect(signal.aborted).toBe(true)
+    expect(FakeRecognition.instances).toHaveLength(1)
+    expect(controller.getSnapshot().active).toBe(false)
+  })
+  it('falls back to the browser on cloud failure', async () => {
+    controller = new VoiceController('ru', 2000, async () => { throw new Error('offline') })
+    controller.read('reply', 'Ответ')
+    await flush()
+    expect(spoken[0].text).toBe('Ответ')
+    expect(controller.getSnapshot().usingFallback).toBe(true)
+  })
+  it('does not fall back after cancelling a cloud request', async () => {
+    let reject!: (error: Error) => void
+    controller = new VoiceController('ru', 2000, () => new Promise<void>((_, fail) => { reject = fail }))
+    controller.read('reply', 'Ответ'); controller.end()
+    reject(new Error('aborted')); await flush()
+    expect(spoken).toHaveLength(0)
+  })
+  it('uses Kazakh for browser read-aloud even with a Russian interface', () => {
+    vi.spyOn(window.speechSynthesis, 'getVoices').mockReturnValue([{ lang: 'kk-KZ', name: 'Kazakh' }] as SpeechSynthesisVoice[])
+    controller.read('reply', 'Сәлем!', 'kk')
+    expect(spoken[0].lang).toBe('kk-KZ')
+  })
+  it('does not generate repeated waiting phrases with cloud speech', async () => {
+    const cloud = vi.fn(async () => {})
+    controller = new VoiceController('ru', 2000, cloud)
+    controller.start(() => new Promise(() => {}))
+    mic().result('Вопрос'); mic().onend?.()
+    vi.advanceTimersByTime(3000)
+    expect(cloud).not.toHaveBeenCalled()
+    expect(spoken).toHaveLength(0)
+  })
   it('chooses a natural voice in the requested language without lowering its pitch', () => {
     const natural = { lang: 'ru-RU', name: 'Microsoft Svetlana Online (Natural)' }
     vi.spyOn(window.speechSynthesis, 'getVoices').mockReturnValue([

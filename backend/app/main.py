@@ -15,12 +15,14 @@ from fastapi.responses import JSONResponse
 from app.admin import audio_response, install_admin
 from app.config import Settings
 from app.corpus import is_fresh, load_corpus
+from app.games import GameRooms
 from app.library import Library
 from app.models import AskRequest, AskResponse
 from app.providers import LiveProviders, Providers
 from app.retrieval import Retriever
 from app.service import AnswerService
 from app.storage import read_settings
+from app.speech import SpeechLimits
 from app.web import HistoryStore, install_web
 
 logger = logging.getLogger("adal")
@@ -46,6 +48,8 @@ def create_app(settings: Settings | None = None, providers: Providers | None = N
             app.state.collection_task = None
             app.state.history = HistoryStore(settings.runtime_dir / "chat.sqlite3")
             app.state.busy_sessions = set()
+            app.state.games = GameRooms()
+            app.state.speech_limits = SpeechLimits()
             report_path = settings.library_dir / "collection-report.json"
             app.state.collection = (
                 json.loads(report_path.read_text()) if report_path.exists() else {"status": "idle"}

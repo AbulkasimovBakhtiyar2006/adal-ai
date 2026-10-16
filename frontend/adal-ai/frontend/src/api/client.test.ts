@@ -21,6 +21,10 @@ describe('safeHttpUrl', () => {
 })
 
 describe('normalizeReply', () => {
+  it('preserves the response language but rejects unknown language values', () => {
+    expect(normalizeReply({ answer: 'Сәлем', response_language: 'kk' }).responseLanguage).toBe('kk')
+    expect(normalizeReply({ answer: 'Hello', response_language: 'en' }).responseLanguage).toBeUndefined()
+  })
   it('отклоняет пустой ответ', () => {
     expect(() => normalizeReply({ answer: '  ', sources: [] })).toThrowError(ApiError)
   })

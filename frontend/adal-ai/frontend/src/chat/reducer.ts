@@ -1,4 +1,4 @@
-import type { ChatReply, ErrorCode, HistoryTurn, ResponseMode } from '../api/types'
+import type { ChatAttachment, ChatReply, ErrorCode, HistoryTurn, ResponseMode } from '../api/types'
 
 /**
  * Один «ход» диалога: вопрос пользователя и то, что с ним произошло.
@@ -8,6 +8,7 @@ import type { ChatReply, ErrorCode, HistoryTurn, ResponseMode } from '../api/typ
 export interface Turn {
   id: string
   question: string
+  attachments?: ChatAttachment[]
   responseMode?: ResponseMode
   phase: 'pending' | 'done' | 'error'
   reply: ChatReply | null
@@ -16,7 +17,7 @@ export interface Turn {
 
 export type ChatAction =
   | { type: 'historyLoaded'; turns: HistoryTurn[] }
-  | { type: 'submitted'; id: string; question: string; responseMode?: ResponseMode }
+  | { type: 'submitted'; id: string; question: string; responseMode?: ResponseMode; attachments?: ChatAttachment[] }
   | { type: 'retried'; id: string }
   | { type: 'succeeded'; id: string; reply: ChatReply }
   | { type: 'failed'; id: string; code: ErrorCode; retryAfter: number | null }
@@ -31,7 +32,7 @@ export function chatReducer(turns: Turn[], action: ChatAction): Turn[] {
       // чтобы экран совпадал с историей на сервере.
       return [
         ...turns.filter((turn) => turn.phase !== 'error'),
-        { id: action.id, question: action.question, responseMode: action.responseMode, phase: 'pending', reply: null, error: null },
+        { id: action.id, question: action.question, attachments: action.attachments, responseMode: action.responseMode, phase: 'pending', reply: null, error: null },
       ]
     case 'retried':
       return turns.map((turn) =>
